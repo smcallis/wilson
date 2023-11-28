@@ -46,7 +46,10 @@ struct Gnomonic final : ProjectionBase<Gnomonic> {
   }
 
   S2Cap Viewcap() const override {
-    return S2Cap(nadir(), S1ChordAngle::Radians(ViewAngle()/scale()));
+    return S2Cap(
+      nadir(),
+      S1ChordAngle::Radians(
+        std::min(ViewAngle()/2, 2*std::atan(1/scale()))));
   }
 
   // Edges are always straight lines in gnomonic projections, so we can simplify
