@@ -172,12 +172,18 @@ struct Equirectangular final : ProjectionBase<Equirectangular> {
     return scale()*R2Point(std::atan2(p.y(), p.x())/M_PI, -std::asin(p.z())/M_PI);
   }
 
-  bool UnitToWorld(S2Point& out, const R2Point& proj, bool project=false) const override {
+  bool UnitToWorld(S2Point& out, const R2Point& proj, bool nearest=false) const override {
     double lat = proj.y()/scale();
     double lon = proj.x()/scale();
 
     if (std::fabs(lat) > 0.5 || std::fabs(lon) > 1) {
-      return false;
+      if (!nearest) {
+        return false;
+      }
+
+      // Clamp the latitude and longitude
+      lat = std::min(0.5, std::max(-0.5, lat));
+      lon = std::min(1.0, std::max(-1.0, lon));
     }
 
     double clat = std::cos(M_PI*lat);
@@ -186,6 +192,7 @@ struct Equirectangular final : ProjectionBase<Equirectangular> {
     double slon = std::sin(M_PI*lon);
 
     out = S2Point(clat*clon, clat*slon, -slat);
+
     return true;
   }
 

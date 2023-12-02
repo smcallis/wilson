@@ -570,7 +570,7 @@ public:
 
     // Draw lat/lon if we have it.
     S2Point pnt;
-    if (projection_->Unproject(pnt, mouse_)) {
+    if (projection_->Unproject(pnt, mouse_, true)) {
       // DrawText(20, height()-25, pixel(0xffffcc00),
       //   absl::StrFormat("Lat: %+10.6f  Lon: %+11.6f  (%f %f %f)",
       //     S2LatLng(pnt).lat().degrees(),

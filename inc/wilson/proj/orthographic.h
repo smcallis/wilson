@@ -100,7 +100,7 @@ struct Orthographic final : ProjectionBase<Orthographic> {
     return {proj.x(), proj.y()};
   }
 
-  bool UnitToWorld(S2Point& out, const R2Point& proj, bool project=false) const override {
+  bool UnitToWorld(S2Point& out, const R2Point& proj, bool nearest=false) const override {
     S2Point pnt = unit_to_world_*S2Point(proj.x(), proj.y(), 0);
 
     // Unprojecting the point gives us the y/z coordinates of a line in 3 space.
@@ -115,7 +115,7 @@ struct Orthographic final : ProjectionBase<Orthographic> {
     }
 
     // Otherwise we missed the sphere.  Return a unit vector in the X==0 plane.
-    if (project) {
+    if (nearest) {
       pnt.x(0);
       out = pnt.Normalize();
       return true;

@@ -34,10 +34,11 @@ inline R2Shape S2Graticule(const Projection& proj, int level, R2Shape shape={}) 
   // visible.
   S2Cap cap = proj.Viewcap();
   Plane clip {cap.center(), (1-cap.height())*cap.center()};
+  bool clip_cap = cap.radius() < S1ChordAngle::Right();
 
   // Projects and subdivides an S2Shape edge and appends it to the path.
   const auto AppendEdgeToShape = [&](S2Shape::Edge edge) {
-    if (clip.ClipEdgeOnSphere(edge)) {
+    if (!clip_cap || clip.ClipEdgeOnSphere(edge)) {
       for (const S2Shape::Edge& edge : proj.Clip(edge)) {
         proj.Subdivide(shape, edge, 0.25, true);
         shape.EndChain();

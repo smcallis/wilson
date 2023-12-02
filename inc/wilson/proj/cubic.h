@@ -56,7 +56,7 @@ struct Cubic final : ProjectionBase<Cubic> {
   R2Shape Outline(R2Shape shape={}) const override {
     shape.clear();
     for (const PointAngle& pa : r2outline_) {
-      shape.Append(pa);
+      shape.Append(pa.screen);
     }
     shape.EndChain();
     return shape;
@@ -213,7 +213,7 @@ struct Cubic final : ProjectionBase<Cubic> {
 
     out.Append(p1);
     for (int i=beg % N; i != end % N; i = (i+1) % N) {
-      out.Append(r2outline_[i]);
+      out.Append(r2outline_[i].screen);
     }
   }
 
@@ -231,7 +231,7 @@ struct Cubic final : ProjectionBase<Cubic> {
   }
 
   // Convert from unit space back to world space.
-  bool UnitToWorld(S2Point& out, const R2Point& pnt, bool project=false) const override {
+  bool UnitToWorld(S2Point& out, const R2Point& pnt, bool nearest=false) const override {
     // Treat each square face as being composed of an upper and lower triangular
     // half.  We can get barycentric coordinates for the point in each triangle
     // and easily check whether it's contained in the face or not.
@@ -255,8 +255,41 @@ struct Cubic final : ProjectionBase<Cubic> {
       }
     }
 
-    if (project) {
-      assert(false && "not yet supported");
+    // We didn't hit any faces, if a nearest point was requested then project
+    // onto the closest outline edge.
+    if (nearest) {
+      // Find the closest outline segment to project onto.
+      double min_dist = +INFINITY;
+      int    min_vert = -1;
+      double min_frac = -1;
+
+      const int N = r2outline_.size();
+      for (int i=0; i < r2outline_.size(); ++i) {
+        R2Point A = r2outline_[i].unit;
+        R2Point B = r2outline_[(i+1) % N ].unit;
+
+        R2Point C = pnt;
+        B -= A;
+        C -= A;
+
+        double frac = std::min(1.0, std::max(0.0, C.DotProd(B)/B.Norm2()));
+        double dist = (frac*B - C).Norm2();
+
+        if (dist < min_dist) {
+          min_dist = dist;
+          min_vert = i;
+          min_frac = frac;
+        }
+      }
+
+      assert(min_idx >= 0 && "No minimum? Should never happen.");
+
+      // If we were closest to the interior of an edge, return that.
+      S2Point A = r2outline_[min_vert].world;
+      S2Point B = r2outline_[(min_vert + 1) % N].world;
+
+      out = Rotate(S2::Interpolate(A, B, min_frac));
+      return true;
     }
 
     return false;
@@ -281,18 +314,21 @@ private:
   // List of currently visible faces.
   std::vector<ProjectedFace> visible_faces_;
 
-  // A 2D point and its angle around some center point.  We use this so that we
-  // can sort outline vertices in screen space for outline stitching.
-  struct PointAngle : R2Point {
-    PointAngle(R2Point p, R2Point center)
-      : R2Point(p) {
-      R2Point pc = p-center;
-
+  // A point in world, screen and unit coordinates along with its angle around
+  // some center point in screen space.  This can be sorted by angle to find
+  // vertices for outline stitching.
+  struct PointAngle {
+    PointAngle(R2Point screen, R2Point center, S2Point world={}, R2Point unit={})
+      : world(world), screen(screen), unit(unit) {
       // Note that we negate the y coordinate to accommodate screen coordinates
       // so that points are ordered CW _on screen_.
+      const R2Point pc = screen-center;
       angle = std::atan2(-pc.y(), pc.x());
     }
 
+    S2Point world;
+    R2Point screen;
+    R2Point unit;
     double angle;
 
     bool operator<(const PointAngle& b) const { return angle < b.angle; }
@@ -308,7 +344,7 @@ private:
 
 inline void Cubic::UpdateTransforms() {
   // Normal vectors for each cube face.
-  static const S2Point kFaceNormals[] = {
+  static constexpr S2Point kFaceNormals[] = {
     {+1, 0, 0},
     { 0,+1, 0},
     { 0, 0,+1},
@@ -369,7 +405,8 @@ inline void Cubic::UpdateTransforms() {
   const R2Point center = Project(nadir());
   r2outline_.clear();
   for (auto pair : vertex_map) {
-    r2outline_.emplace_back(Project(pair.first), center);
+    const R2Point screen = Project(pair.first);
+    r2outline_.emplace_back(screen, center, pair.first, ScreenToUnit(screen));
   }
   absl::c_sort(r2outline_);
 }

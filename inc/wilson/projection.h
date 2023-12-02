@@ -219,10 +219,10 @@ struct Projection {
   // projection of the point hits the unit sphere, out is set to that point and
   // true is returned.
   //
-  // Otherwise, if project is true, then we project the point onto the closest
+  // Otherwise, if nearest is true, then we project the point onto the closest
   // visible point on the sphere and return true.
   virtual bool UnitToWorld(S2Point& out,
-    const R2Point&, bool project=false) const = 0;
+    const R2Point&, bool nearest=false) const = 0;
 
   // Converts a point from world space back to unit space.
   virtual R2Point WorldToUnit(const S2Point& p) const = 0;
@@ -256,7 +256,7 @@ struct Projection {
   //
   // Not all points in screen space are invertible, so this returns the result
   // (if any) through a parameter and returns true on success.
-  virtual bool Unproject(S2Point& out, const R2Point& pnt) const = 0;
+  virtual bool Unproject(S2Point& out, const R2Point& pnt, bool nearest=false) const = 0;
 
   // Takes an S2Shape edge and clips it to the portion of the sphere currently
   // visible in the projection.  If need be, the edge is broken into multiple
@@ -378,7 +378,7 @@ struct ProjectionBase : Projection {
   // Not all screen space points may intersect the sphere.  If the point misses
   // this function returns false, otherwise it returns true and sets out to the
   // unprojected point on the sphere.
-  virtual bool Unproject(S2Point& out, const R2Point& pnt) const override;
+  virtual bool Unproject(S2Point& out, const R2Point& pnt, bool nearest=false) const override;
 
   // Project an entire S2Shape into screen space.  Takes care to Clip() and
   // Stitch() edges that leave the projection entirely.
@@ -424,8 +424,8 @@ template <typename Derived>
 inline S1ChordAngle ProjectionBase<Derived>::R2EdgeDistance(
   R2Point v0, R2Point v1, S2Point center, S1ChordAngle dist) const {
   S2Point p0, p1;
-  bool got0 = Unproject(p0, v0);
-  bool got1 = Unproject(p1, v1);
+  bool got0 = Unproject(p0, v0, true);
+  bool got1 = Unproject(p1, v1, true);
 
   if (got0) dist = std::max(dist, S1ChordAngle::Radians(p0.Angle(center)));
   if (got1) dist = std::max(dist, S1ChordAngle::Radians(p1.Angle(center)));
@@ -533,9 +533,9 @@ inline R2Point ProjectionBase<Derived>::Project(const S2Point& pnt) const {
 
 
 template <typename Derived>
-bool ProjectionBase<Derived>::Unproject(S2Point& out, const R2Point& pnt) const {
+bool ProjectionBase<Derived>::Unproject(S2Point& out, const R2Point& pnt, bool nearest) const {
   S2Point ans;
-  if (projection().UnitToWorld(ans, projection().ScreenToUnit(pnt))) {
+  if (projection().UnitToWorld(ans, projection().ScreenToUnit(pnt), nearest)) {
     out = projection().Unrotate(ans);
     return true;
   }

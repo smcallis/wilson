@@ -165,7 +165,7 @@ struct Gnomonic final : ProjectionBase<Gnomonic> {
     return (scale()*sin_angle_/cos_angle_)*R2Point(p.y()/p.x(), -p.z()/p.x());
   }
 
-  bool UnitToWorld(S2Point& out, const R2Point& proj, bool project=false) const override {
+  bool UnitToWorld(S2Point& out, const R2Point& proj, bool nearest=false) const override {
     R2Point pnt = (cos_angle_/(sin_angle_*scale()))*proj;
 
     double rr = pnt.Norm2();
@@ -175,9 +175,9 @@ struct Gnomonic final : ProjectionBase<Gnomonic> {
       return true;
     }
 
-    // Missed the sphere, if project is true find a vector of the appropriate
+    // Missed the sphere, if nearest is true find a vector of the appropriate
     // radius in the clip plane as the closest point on the sphere.
-    if (project) {
+    if (nearest) {
       double radius = cos_angle_;
       pnt = pnt.Normalize()*radius;
       out = S2Point(sin_angle_, pnt.x(), -pnt.y()).Normalize();
