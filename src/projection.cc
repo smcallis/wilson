@@ -29,28 +29,7 @@ namespace {  // prevent external linkage.
 class S2ViewportRegion : public S2Region {
 public:
   S2ViewportRegion(const Projection* projection)
-      : projection_(projection) {
-    region2 screen(0, 0, projection_->width(), projection_->height());
-
-    // Compute an S2Cap bound once.
-    S2Point center = projection_->nadir();
-
-    // Try to unproject the corner of the screen to get a radius for the cap,
-    // if we miss the sphere then we'll use a 90 degree radius.
-    S1ChordAngle radius = S1ChordAngle::Zero();
-    for (int ii=0; ii < 4; ++ii) {
-      S2Point corner;
-      if (projection_->Unproject(corner, screen.GetVertex(ii))) {
-        radius = std::max(radius, S1ChordAngle::Radians(center.Angle(corner)));
-      }
-    }
-
-    // None of the corners hit the sphere, use a 90 degree cap.
-    if (radius == S1ChordAngle::Zero()) {
-      radius = S1ChordAngle::Right();
-    }
-    s2cap_ = S2Cap(center, radius);
-  }
+      : projection_(projection) {}
 
   S2ViewportRegion* Clone() const override {
     return new S2ViewportRegion(*this);
@@ -124,7 +103,6 @@ public:
 
 private:
   const Projection* projection_;
-  S2Cap s2cap_;
 
   // Returns true if an R2 edge intersects the screen region.
   static bool EdgeIntersectsScreen(
