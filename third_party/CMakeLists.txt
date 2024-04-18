@@ -9,7 +9,7 @@ CPMAddPackage(
   NAME abseil
   GITHUB_REPOSITORY abseil/abseil-cpp
   GIT_TAG master
-  OPTIONS "ABSL_PROPAGATE_CXX_STD ON"
+  OPTIONS "ABSL_PROPAGATE_CXX_STD ON" "ABSL_ENABLE_INSTALL ON"
 )
 
 # Required for Blend2d
@@ -39,10 +39,10 @@ CPMAddPackage(
 
 CPMAddPackage(
   NAME s2
-  GIT_TAG 7773d518
-  VERSION 7773d518
+  GIT_TAG v0.11.1
+  VERSION v0.11.1
   GITHUB_REPOSITORY google/s2geometry
-  OPTIONS "WITH_GFLAGS off" "WITH_GLOG off"
+  OPTIONS "WITH_GFLAGS off" "WITH_GLOG off" "BUILD_TESTS off"
 )
 
 # Only compile SDL2 if we're not building for Emscripten.  If we are then we
