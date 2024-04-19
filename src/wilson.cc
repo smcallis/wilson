@@ -192,34 +192,17 @@ public:
         }
         ImGui::Unindent();
 
+        // Display selectable list of projections.
         if (ImGui::CollapsingHeader("Projection")) {
           ImGui::Indent();
 
-          const Quaternion rotation = projection_->rotation();
-          const double scale = projection_->scale();
-
-          if (ImGui::Selectable("Cubic")) {
-            projection_ = std::make_unique<Cubic>();
-            Resize();
-          }
-
-          if (ImGui::Selectable("Gnomonic")) {
-            projection_ = std::make_unique<Gnomonic>();
-            Resize();
-          }
-
-          if (ImGui::Selectable("Orthographic")) {
-            projection_ = std::make_unique<Orthographic>();
-            Resize();
-          }
-
-          if (ImGui::Selectable("Plate-Carree")) {
-            projection_ = std::make_unique<Equirectangular>();
-            Resize();
-          }
-
-          projection_->SetRotation(rotation);
-          projection_->SetScale(scale);
+          EachProjection([&](const ProjectionInfo& info) {
+            if (ImGui::Selectable(info.name.data())) {
+              projection_ = info.factory(
+                projection_->rotation(), projection_->scale());
+              Resize();
+            }
+          });
 
           ImGui::Unindent();
         }

@@ -14,9 +14,57 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "absl/flags/flag.h"
 #include "wilson/projection.h"
 
 #include "wilson/proj/cubic.h"
 #include "wilson/proj/equirectangular.h"
 #include "wilson/proj/gnomonic.h"
 #include "wilson/proj/orthographic.h"
+
+ABSL_FLAG(bool, experimental_projections, false, "Enable experimental projections");
+
+namespace w {
+
+struct ProjectionInfo {
+  using MakeProjectionFn = absl::AnyInvocable <
+      std::unique_ptr<Projection>(Quaternion rotation, double scale) const>;
+
+  template <typename T>
+  static ProjectionInfo Create(  //
+      absl::string_view name, bool experimental = false) {
+
+    const auto Factory = [](Quaternion rotation, double scale) {
+      auto projection = std::make_unique<T>();
+      projection->SetRotation(rotation);
+      projection->SetScale(scale);
+      return projection;
+    };
+
+    return {name, Factory, experimental};
+  }
+
+  absl::string_view name;
+  MakeProjectionFn factory;
+  bool experimental = false;
+};
+
+// Configure projections here.
+static const ProjectionInfo kProjectionList[] = {
+  ProjectionInfo::Create<Cubic>("Cubic", true),
+  ProjectionInfo::Create<Equirectangular>("Plate-Carree", true),
+  ProjectionInfo::Create<Orthographic>("Orthographic", false),
+  ProjectionInfo::Create<Gnomonic>("Gnomonic", false)
+};
+
+// Calls a function with each configured projection's ProjectionInfo entry.
+static inline void EachProjection(
+  absl::FunctionRef<void(const ProjectionInfo&)> visitor) {
+  for (const auto& info : kProjectionList) {
+    if (!info.experimental || absl::GetFlag(FLAGS_experimental_projections)) {
+      visitor(info);
+    }
+  }
+}
+
+}  // namespace wilson
