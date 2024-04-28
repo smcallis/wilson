@@ -34,11 +34,11 @@
 
 namespace w {
 
-struct Gnomonic final : ProjectionBase<Gnomonic> {
+struct Gnomonic final : Projection<Gnomonic> {
   static constexpr double kDefaultViewAngle = 2*M_PI/3;
 
   // Include project function explicitly to have visibility with our overloads.
-  using ProjectionBase::Project;
+  using Projection::Project;
 
   Gnomonic() {
     SetViewAngle(kDefaultViewAngle);
@@ -54,12 +54,13 @@ struct Gnomonic final : ProjectionBase<Gnomonic> {
 
   // Edges are always straight lines in gnomonic projections, so we can simplify
   // the subdivision algorithm by not doing it.
-  void Subdivide(R2Shape& out,
-    const S2Shape::Edge& edge, double=1, bool add_last=false) const override {
-    out.Append(Project(edge.v0));
+  R2Shape& Subdivide(absl::Nonnull<R2Shape *> out,
+    const S2Shape::Edge& edge, bool add_last, double) const override {
+    out->Append(Project(edge.v0));
     if (add_last) {
-      out.Append(Project(edge.v1));
+      out->Append(Project(edge.v1));
     }
+    return *out;
   }
 
   // Sets the angle of the cone that's visible in the viewport.  Only the
@@ -88,38 +89,39 @@ struct Gnomonic final : ProjectionBase<Gnomonic> {
 
   // Populates a path representing the outline of the sphere on screen.  May
   // encompass the entire screen.
-  R2Shape Outline(R2Shape shape={}) const override {
-    shape.clear();
+  R2Shape& MakeOutline(absl::Nonnull<R2Shape *> out) const override {
+    out->clear();
 
     // The gnomonic projection is always a unit circle, we can just multiply the
     // radius by the scale to get the correct size.
     R2Point origin = UnitToScreen({0,0});
     R2Point radius = UnitToScreen({scale(), 0});
 
-    shape.AddCircle(origin, (radius-origin).x());
-    return shape;
+    out->AddCircle(origin, (radius - origin).x());
+    return *out;
   }
 
   // Populates a path with a graticule with lines of latitude and longitude.
-  R2Shape MakeGraticule(R2Shape shape={}) const override {
-    shape.clear();
-    //generate_graticule(path);
-    return shape;
+  R2Shape& MakeGraticule(absl::Nonnull<R2Shape *> out) const override {
+    out->clear();
+    // generate_graticule(path);
+    return *out;
   }
 
-  EdgeList Clip(S2Shape::Edge edge, EdgeList edges={}) const override {
+  EdgeList& Clip(absl::Nonnull<EdgeList*> edges, const S2Shape::Edge& edge) const override {
     // The visible area of a gnomonic projection is < half a hemisphere, so its
     // not possible for an edge to leave one side and re-enter on the other.
     // Thus we never have to split edges into multiple parts, so we can just
     // clip the edge once if needed and return it if it's not occluded.
-    edges.clear();
-    if (clip_plane_.ClipEdgeOnSphere(edge)) {
-      edges.emplace_back(edge);
+    edges->clear();
+    S2Shape::Edge copy = edge;
+    if (clip_plane_.ClipEdgeOnSphere(copy)) {
+      edges->emplace_back(copy);
     }
-    return edges;
+    return *edges;
   };
 
-  void Stitch(R2Shape& out, const S2Point& v1, const S2Point& v0) const override {
+  R2Shape& Stitch(absl::Nonnull<R2Shape *> out, const S2Point& v1, const S2Point& v0) const override {
     // The visible region is always < a hemisphere in gnomonic projection.  The
     // visible circle is a unit circle so we can stitch two vertices with edges
     // along that circle.
@@ -157,21 +159,22 @@ struct Gnomonic final : ProjectionBase<Gnomonic> {
 
     for (int i=0; i < nsteps; ++i) {
       R2Point pnt(std::cos(beg + i*step), std::sin(beg + i*step));
-      out.Append(cc + rr*pnt);
+      out->Append(cc + rr*pnt);
     }
+    return *out;
   }
 
-  R2Point WorldToUnit(const S2Point& p) const override {
+  R2Point WorldToUnit(S2Point p) const override {
     return (scale()*sin_angle_/cos_angle_)*R2Point(p.y()/p.x(), -p.z()/p.x());
   }
 
-  bool UnitToWorld(S2Point& out, const R2Point& proj, bool nearest=false) const override {
+  bool UnitToWorld(absl::Nonnull<S2Point*> out, R2Point proj, bool nearest=false) const override {
     R2Point pnt = (cos_angle_/(sin_angle_*scale()))*proj;
 
     double rr = pnt.Norm2();
     double cot = cos_angle_/sin_angle_;
     if (rr <= cot*cot) {
-      out = S2Point(1, pnt.x(), -pnt.y()).Normalize();
+      *out = S2Point(1, pnt.x(), -pnt.y()).Normalize();
       return true;
     }
 
@@ -180,7 +183,7 @@ struct Gnomonic final : ProjectionBase<Gnomonic> {
     if (nearest) {
       double radius = cos_angle_;
       pnt = pnt.Normalize()*radius;
-      out = S2Point(sin_angle_, pnt.x(), -pnt.y()).Normalize();
+      *out = S2Point(sin_angle_, pnt.x(), -pnt.y()).Normalize();
       return true;
     }
 

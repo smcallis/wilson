@@ -18,21 +18,24 @@
 
 #include <vector>
 
+namespace w {
+
 // Implementation of a very simple polgon simplification algorithm.  This just
-// discards vertices that aren't at least tolerance pixels away from the
-// previous vertex, meaning they don't contribute meaningfully to the drawn
+// discards vertices that aren't at least sqrt(max_sq_error) pixels away from
+// the previous vertex, meaning they don't contribute meaningfully to the drawn
 // geometry.
 //
 // Expects geometry already in screen space so that we can reason about
 // distances in pixels to achieve results that look good when drawn to the
 // screen.
-
-namespace w {
-
-static inline R2Shape Simplify(const R2Shape& shape, double tolerance=1, R2Shape out={}) {
-    using std::swap;
-
-    out.clear();
+//
+// max_sq_error is the maximum -squared- error between the true projection of
+// the shape's edges and the edges in screen space, in pixels.
+//
+// Any existing path information is erased.
+static inline void Simplify(absl::Nonnull<R2Shape *> out,
+    const R2Shape& shape, double max_sq_error=1) {
+    out->clear();
     for (int chain=0; chain < shape.nchains(); ++chain) {
         absl::Span<const R2Point> points = shape.chain_vertices(chain);
         if (points.empty()) {
@@ -40,16 +43,15 @@ static inline R2Shape Simplify(const R2Shape& shape, double tolerance=1, R2Shape
         }
 
         int last = 0;
-        out.Append(points[0]);
+        out->Append(points[0]);
         for (int i=1; i < points.size(); ++i) {
-            if ((points[i]-points[last]).Norm2() >= tolerance*tolerance) {
-                out.Append(points[i]);
+            if ((points[i]-points[last]).Norm2() >= max_sq_error) {
+                out->Append(points[i]);
                 last = i;
             }
         }
-        out.EndChain();
+        out->EndChain();
     }
-    return out;
 }
 
 } // namespace w

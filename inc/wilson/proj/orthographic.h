@@ -34,10 +34,13 @@ namespace w {
 // Implementation of logic for an orthographic projection.  This projection just
 // projects everything down to the view plane at a 90 degree angle with no
 // perspective transformation or coordinate shifting.
-struct Orthographic final : ProjectionBase<Orthographic> {
+struct Orthographic final : Projection<Orthographic> {
   // Include project function explicitly to have visibility with our overloads.
-  using ProjectionBase::Project;
-  using Projection::Subdivide;
+  using IProjection::Clip;
+  using IProjection::Subdivide;
+  using IProjection::Unproject;
+  using Projection::Project;
+
 
   Orthographic() {
     UpdateTransforms();
@@ -47,7 +50,7 @@ struct Orthographic final : ProjectionBase<Orthographic> {
     S1ChordAngle radius = S1ChordAngle::Right();
 
     S2Point corner;
-    if (Unproject(corner, screen().GetVertex(0))) {
+    if (Unproject(&corner, screen().GetVertex(0))) {
       radius = S1ChordAngle::Radians(nadir().Angle(corner));
     }
     return S2Cap(nadir(), radius);
@@ -55,52 +58,50 @@ struct Orthographic final : ProjectionBase<Orthographic> {
 
   // Populates a path representing the outline of the sphere on screen.  May
   // encompass the entire screen.
-  R2Shape Outline(R2Shape shape={}) const override {
-    shape.clear();
+  R2Shape& MakeOutline(absl::Nonnull<R2Shape*> out) const override {
+    out->clear();
 
     // Find basis vectors for nadir plane that correspond to the axes of
     // the ellipse of the Earth in the projection.
     S2Point n = Unrotate(S2Point(0,0,1));
     S2Point v = n.CrossProd(nadir()).Normalize();
-    //S2Point u = nadir().CrossProd(v).Normalize();
 
     R2Point np = Project(nadir());
-    //R2Point up = Project(u);
     R2Point vp = Project(v);
 
-    shape.AddCircle(np, (vp-np).Norm());
-    return shape;
-    //shape.addEllipse(BLEllipse(np.x(), np.y(), (vp-np).Norm(), (up-np).Norm()));
+    out->AddCircle(np, (vp - np).Norm());
+    return *out;
   }
 
   // Populates a path with a graticule with lines of latitude and longitude.
-  R2Shape MakeGraticule(R2Shape shape={}) const override {
-    shape.clear();
-    GenerateGraticule(shape);
-    return shape;
+  R2Shape& MakeGraticule(absl::Nonnull<R2Shape*> out) const override {
+    out->clear();
+    GenerateGraticule(out);
+    return *out;
   }
 
-  EdgeList Clip(S2Shape::Edge edge, EdgeList edges={}) const override {
-    edges.clear();
-    if (Plane(nadir()).ClipEdgeOnSphere(edge)) {
-      edges.emplace_back(edge);
+  EdgeList& Clip(absl::Nonnull<EdgeList*> edges, const S2Shape::Edge& edge) const override {
+    edges->clear();
+    S2Shape::Edge copy = edge;
+    if (Plane(nadir()).ClipEdgeOnSphere(copy)) {
+      edges->emplace_back(copy);
     }
-    return edges;
+    return *edges;
   }
 
-  void Stitch(R2Shape& out, const S2Point& v1, const S2Point& v0) const override {
+  R2Shape& Stitch(absl::Nonnull<R2Shape*> out, const S2Point& v1, const S2Point& v0) const override {
     // Orthographic projection is always a circle on the screen and the clip
     // bisects the sphere (making it a great circle).  So we can just subdivide
     // an edge normally to connect them.
-    Subdivide(out, {v1, v0});
+    return Subdivide(out, {v1, v0});
   }
 
-  R2Point WorldToUnit(const S2Point& p) const override {
+  R2Point WorldToUnit(S2Point p) const override {
     S2Point proj = world_to_unit_*p;
     return {proj.x(), proj.y()};
   }
 
-  bool UnitToWorld(S2Point& out, const R2Point& proj, bool nearest=false) const override {
+  bool UnitToWorld(absl::Nonnull<S2Point*> out, R2Point proj, bool nearest=false) const override {
     S2Point pnt = unit_to_world_*S2Point(proj.x(), proj.y(), 0);
 
     // Unprojecting the point gives us the y/z coordinates of a line in 3 space.
@@ -110,14 +111,14 @@ struct Orthographic final : ProjectionBase<Orthographic> {
     double mag2 = pnt.Norm2();
     if (mag2 <= 1) {
       pnt.x(sqrt(1-mag2));
-      out = pnt.Normalize();
+      *out = pnt.Normalize();
       return true;
     }
 
     // Otherwise we missed the sphere.  Return a unit vector in the X==0 plane.
     if (nearest) {
       pnt.x(0);
-      out = pnt.Normalize();
+      *out = pnt.Normalize();
       return true;
     }
 
@@ -146,7 +147,7 @@ protected:
 
 private:
   // Regenerate the graticule path with the current transform.
-  void GenerateGraticule(R2Shape& shape) const {
+  void GenerateGraticule(absl::Nonnull<R2Shape*> out) const {
     // Draw lines of longitude.
     for (int i=0; i < 36; ++i) {
       double lon = -M_PI + (M_PI/180)*10*i;
@@ -156,14 +157,14 @@ private:
       if (i % 9 == 0) {
         limit = 90;
       }
-      GenerateMeridian(shape, lon, M_PI/180.0*limit);
-      shape.EndChain();
+      GenerateMeridian(out, lon, M_PI/180.0*limit);
+      out->EndChain();
     }
-    GenerateParallels(shape);
+    GenerateParallels(out);
   }
 
   // Generate meridian curves.
-  void GenerateMeridian(R2Shape& shape, double lon, double maxlat) const {
+  void GenerateMeridian(absl::Nonnull<R2Shape*> out, double lon, double maxlat) const {
     double clon = std::cos(lon);
     double clat = std::cos(maxlat);
     double slon = std::sin(lon);
@@ -175,12 +176,13 @@ private:
     S2Point v1 = S2Point(clon, slon, 0);
     S2Point v2 = S2Point(clat*clon, clat*slon, -slat);
 
-    for (const auto& edge : Clip({v0, v1})) {
-      Subdivide(shape, edge, 0.25, true);
+    IProjection::EdgeList edges;
+    for (const auto& edge : Clip(&edges, {v0, v1})) {
+      Subdivide(out, edge, 0.25, true);
     }
 
-    for (const auto& edge : Clip({v1, v2})) {
-      Subdivide(shape, edge, 0.25, true);
+    for (const auto& edge : Clip(&edges, {v1, v2})) {
+      Subdivide(out, edge, 0.25, true);
     }
   }
 
@@ -204,13 +206,13 @@ private:
     return BLPoint(pnt.x(), pnt.y());
   }
 
-  void GenerateParallels(R2Shape& shape) const;
+  void GenerateParallels(absl::Nonnull<R2Shape*> out) const;
 
   // Forward and reverse transformation matrices.
   Affine3 world_to_unit_, unit_to_world_;
 };
 
-void Orthographic::GenerateParallels(R2Shape& shape) const {
+void Orthographic::GenerateParallels(absl::Nonnull<R2Shape*> out) const {
   // Generate lines of latitude.
   //
   // This is more complex because we have to find the limb points for each line

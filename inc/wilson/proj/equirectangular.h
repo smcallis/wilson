@@ -34,9 +34,9 @@
 
 namespace w {
 
-struct Equirectangular final : ProjectionBase<Equirectangular> {
+struct Equirectangular final : Projection<Equirectangular> {
   // Import this explicitly so we can see it with our other Project() overloads.
-  using ProjectionBase::Project;
+  using Projection::Project;
 
   // Equirectangular requires a 2:1 aspect ratio fit into the visible region.
   static constexpr double kAspectRatio = 2.0;
@@ -64,27 +64,27 @@ struct Equirectangular final : ProjectionBase<Equirectangular> {
 
   // Populates a path representing the outline of the sphere on screen.  May
   // encompass the entire screen.
-  R2Shape Outline(R2Shape shape={}) const override {
-    shape.clear();
-    shape.Append(R2Point(outline_.lo().x(), outline_.lo().y()));
-    shape.Append(R2Point(outline_.hi().x(), outline_.lo().y()));
-    shape.Append(R2Point(outline_.hi().x(), outline_.hi().y()));
-    shape.Append(R2Point(outline_.lo().x(), outline_.hi().y()));
-    shape.CloseChain();
-    return shape;
+  R2Shape& MakeOutline(absl::Nonnull<R2Shape*> out) const override {
+    out->clear();
+    out->Append(R2Point(outline_.lo().x(), outline_.lo().y()));
+    out->Append(R2Point(outline_.hi().x(), outline_.lo().y()));
+    out->Append(R2Point(outline_.hi().x(), outline_.hi().y()));
+    out->Append(R2Point(outline_.lo().x(), outline_.hi().y()));
+    out->CloseChain();
+    return *out;
   }
 
   // Populates a path with a graticule with lines of latitude and longitude.
-  R2Shape MakeGraticule(R2Shape shape={}) const override {
-    shape.clear();
-    //generate_graticule(path);
-    return shape;
+  R2Shape& MakeGraticule(absl::Nonnull<R2Shape*> out) const override {
+    out->clear();
+    // generate_graticule(path);
+    return *out;
   }
 
-  EdgeList Clip(S2Shape::Edge edge, EdgeList edges={}) const override {
+  EdgeList& Clip(absl::Nonnull<EdgeList*> edges, const S2Shape::Edge& edge) const override {
     // Equirectangular projection has a cut at the anti-meridian.  Test if the
     // edge crosses it and split the edge if so.
-    edges.clear();
+    edges->clear();
 
     // Returns -1, 0, or +1 depending on the value of x.
     const auto Sign = [](double x) {
@@ -101,8 +101,8 @@ struct Equirectangular final : ProjectionBase<Equirectangular> {
 
     // If both vertices were on one side, then there's nothing to do.
     if ((sign0 < 0 && sign1 < 0) || (sign0 > 0 && sign1 > 0)) {
-      edges.emplace_back(edge);
-      return edges;
+      edges->emplace_back(edge);
+      return *edges;
     }
 
     // Find the intersection point, flip it to the correct half of the sphere
@@ -115,8 +115,8 @@ struct Equirectangular final : ProjectionBase<Equirectangular> {
     // The edge crossed the anti-meridian plane, but it did so in the opposite
     // hemisphere, so the edge wasn't cut.
     if (isect.DotProd(amperp) <= 0) {
-      edges.emplace_back(edge);
-      return edges;
+      edges->emplace_back(edge);
+      return *edges;
     }
 
     // The edges weren't both on one side and the intersection point was in the
@@ -130,9 +130,9 @@ struct Equirectangular final : ProjectionBase<Equirectangular> {
     // the edge and perturb the vertices to the right side to avoid accidental
     // meridian wrapping due to numerical error.
     if (sign0 == -sign1) {
-      edges.emplace_back(edge.v0, S2::Interpolate(edge.v0, isect, 1-1e-6));
-      edges.emplace_back(S2::Interpolate(isect, edge.v1, 1e-6), edge.v1);
-      return edges;
+      edges->emplace_back(edge.v0, S2::Interpolate(edge.v0, isect, 1-1e-6));
+      edges->emplace_back(S2::Interpolate(isect, edge.v1, 1e-6), edge.v1);
+      return *edges;
     }
 
     // Otherwise one or the other sign was zero.  When this happens we need to
@@ -144,35 +144,35 @@ struct Equirectangular final : ProjectionBase<Equirectangular> {
     // change.  So if the other vertex is on the positive side of the cut, then
     // we'll split the edge.
     if (sign0 == 0 && sign1 == 0) {
-      return edges;
+      return *edges;
     }
 
     if (sign0 == 0) {
-      edges.emplace_back(edge.v0, S2::Interpolate(edge.v0, edge.v1, 1e-6));
-      return edges;
+      edges->emplace_back(edge.v0, S2::Interpolate(edge.v0, edge.v1, 1e-6));
+      return *edges;
     }
 
     if (sign1 == 0) {
-      edges.emplace_back(edge.v0, S2::Interpolate(edge.v0, edge.v1, 1-1e-6));
-      return edges;
+      edges->emplace_back(edge.v0, S2::Interpolate(edge.v0, edge.v1, 1-1e-6));
+      return *edges;
     }
 
-    // edges.emplace_back(edge);
-    return edges;
-  };
-
-  void Stitch(R2Shape& out, const S2Point& v1, const S2Point& v0) const override {
-    // The edges of the projection are always straight vertical or horizontal
-    // lines so we can just use a line to stitch points together.
-    out.Append(Project(v1));
-    out.Append(Project(v0));
+    return *edges;
   }
 
-  R2Point WorldToUnit(const S2Point& p) const override {
+  R2Shape& Stitch(absl::Nonnull<R2Shape*> out, const S2Point& v1, const S2Point& v0) const override {
+    // The edges of the projection are always straight vertical or horizontal
+    // lines so we can just use a line to stitch points together.
+    out->Append(Project(v1));
+    out->Append(Project(v0));
+    return *out;
+  }
+
+  R2Point WorldToUnit(S2Point p) const override {
     return scale()*R2Point(std::atan2(p.y(), p.x())/M_PI, -std::asin(p.z())/M_PI);
   }
 
-  bool UnitToWorld(S2Point& out, const R2Point& proj, bool nearest=false) const override {
+  bool UnitToWorld(absl::Nonnull<S2Point*> out, R2Point proj, bool nearest=false) const override {
     double lat = proj.y()/scale();
     double lon = proj.x()/scale();
 
@@ -191,28 +191,27 @@ struct Equirectangular final : ProjectionBase<Equirectangular> {
     double clon = std::cos(M_PI*lon);
     double slon = std::sin(M_PI*lon);
 
-    out = S2Point(clat*clon, clat*slon, -slat);
-
+    *out = S2Point(clat * clon, clat * slon, -slat);
     return true;
   }
 
-  R2Shape Project(const S2Shape&, R2Shape={}) const override final;
+  R2Shape& Project(absl::Nonnull<R2Shape *> out,  //
+    const S2Shape& shape, double max_sq_error) const override;
 
 private:
   region2 outline_;
 };
 
 
-R2Shape Equirectangular::Project(const S2Shape& shape, R2Shape r2shape) const {
-  r2shape.clear();
-
+R2Shape& Equirectangular::Project(absl::Nonnull<R2Shape *> out,  //
+  const S2Shape& shape, double max_sq_error) const {
   std::vector<S2Shape::Edge> chain_edges;
   std::vector<int> cuts;
 
   // Subdivide a range of edges from chain_edges into the shape.
   const auto SubdivideRange= [&](int beg, int end) {
     for (int i=beg; i < end; ++i) {
-      Subdivide(r2shape, chain_edges[i]);
+      Subdivide(out, chain_edges[i], false, max_sq_error);
     }
   };
 
@@ -221,7 +220,7 @@ R2Shape Equirectangular::Project(const S2Shape& shape, R2Shape r2shape) const {
   const auto StitchEdges = [&](int idx_b, int idx_a) {
     const S2Shape::Edge& edge_a = chain_edges[idx_a];
     const S2Shape::Edge& edge_b = chain_edges[idx_b];
-    Stitch(r2shape, edge_b.v1, edge_a.v0);
+    Stitch(out, edge_b.v1, edge_a.v0);
   };
 
   // Test whether two points are on opposite sides of the anti-meridian cut.
@@ -238,7 +237,7 @@ R2Shape Equirectangular::Project(const S2Shape& shape, R2Shape r2shape) const {
 
     // Gather all the clipped chain edges together, noting cut locations.
     for (int i=0; i < nedge; ++i) {
-      edges = Clip(shape.chain_edge(chain, i), std::move(edges));
+      Clip(&edges, shape.chain_edge(chain, i));
       for (int j=0; j < edges.size(); ++j) {
         if (j > 0) {
           cuts.emplace_back(chain_edges.size());
@@ -251,7 +250,7 @@ R2Shape Equirectangular::Project(const S2Shape& shape, R2Shape r2shape) const {
     // cuts, then we can just form a single contiguous chain.
     if (cuts.empty()) {
       SubdivideRange(0, chain_edges.size());
-      r2shape.EndChain();
+      out->EndChain();
       continue;
     }
 
@@ -282,29 +281,29 @@ R2Shape Equirectangular::Project(const S2Shape& shape, R2Shape r2shape) const {
         if (dot0*dot1 < 0) {
           if (dot1 < 0) {
             // Wrapping the north pole, stitch around it.
-            r2shape.Append(Project(epnt));
-            r2shape.Append(R2Point(outline_.hi().x(), outline_.lo().y()));
-            r2shape.Append(R2Point(outline_.lo().x(), outline_.lo().y()));
-            r2shape.Append(Project(bpnt));
+            out->Append(Project(epnt));
+            out->Append(R2Point(outline_.hi().x(), outline_.lo().y()));
+            out->Append(R2Point(outline_.lo().x(), outline_.lo().y()));
+            out->Append(Project(bpnt));
           } else {
             // Wrapping the south pole, stitch around it.
-            r2shape.Append(Project(epnt));
-            r2shape.Append(R2Point(outline_.lo().x(), outline_.hi().y()));
-            r2shape.Append(R2Point(outline_.hi().x(), outline_.hi().y()));
-            r2shape.Append(Project(bpnt));
+            out->Append(Project(epnt));
+            out->Append(R2Point(outline_.lo().x(), outline_.hi().y()));
+            out->Append(R2Point(outline_.hi().x(), outline_.hi().y()));
+            out->Append(Project(bpnt));
           }
-          r2shape.EndChain();
+          out->EndChain();
           continue;
         }
       }
 
       // Otherwise it's a normal cut, just stitch it together and continue.
       StitchEdges(end-1, beg);
-      r2shape.EndChain();
+      out->EndChain();
     }
   }
 
-  return r2shape;
+  return *out;
 }
 
 } // namespace w

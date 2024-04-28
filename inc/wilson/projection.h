@@ -14,7 +14,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <optional>
+
 #include "absl/base/thread_annotations.h"
+#include "absl/base/nullability.h"
 #include "absl/container/inlined_vector.h"
 #include "absl/functional/function_ref.h"
 #include "absl/synchronization/mutex.h"
@@ -46,15 +49,19 @@ namespace w {
 //     common is that they operate on the unit sphere.  By rotating the sphere
 //     we can reposition the viewport in a way that works for -all- projections.
 //
-//   * It's simpler.  The center of the projection on-screen always represents
-//     the origin in some normalized coordinate system.  The visible portion
-//     of the screen is the region ([-w/2,+w/2], [-h/2,h/2]) (possibly scaled
-//     slightly to accomodate projections with different aspect ratios)
-//
 //   * It's more separable.  The individual projection implementations only have
 //     to focus on their projection-specific details relative to a unit sphere,
-//     without having to worry about zoom and rotation.
-
+//     without having to worry about zoom and rotation on their own.
+//
+// The downside is that some projections seem 'odd' when the underlying sphere
+// has been rotated.  An easy example is the Plate carrée projection, which is
+// -highly- distorted at the poles.  As the unit sphere is rotated, this
+// distortion is readily apparent.  But, this is a feature of the projection
+// itself and shouldn't be disregarded.
+//
+// Class Structure
+// ───────────────
+//
 // For algorithms such as edge subdivision, the core logic is the same for any
 // projection, only the details of projecting to screen space change.  We'd
 // prefer not to dispatch virtually for every single call to Project().
@@ -66,13 +73,13 @@ namespace w {
 // basic interface that a projection must implement.
 //
 // Then we define the type that derived projections can inherit from, which is
-// ProjectionBase<T>.  This uses CRTP to provide default implementations for
+// Projection<T>.  This uses CRTP to provide default implementations for
 // pieces of the Projection API with the benefit of knowing the derived class
 // type.
 //
-// Projections can then just inherit from ProjectionBase<T> with CRTP and
-// they'll receive the default implementations for things like edge subdivision.
-// They may still be overridden in derived classes as appropriate (e.g. Gnomonic
+// Projections can then just inherit from Projection<T> with CRTP and they'll
+// receive the default implementations for things like edge subdivision.  They
+// may still be overridden in derived classes as appropriate (e.g. Gnomonic
 // projections turn edges into straight lines so edge subdivision isn't useful
 // there).
 //
@@ -82,32 +89,62 @@ namespace w {
 //          |
 //          v
 //  +-------------------+
-//  | ProjectionBase<T> |<--------------+
+//  | Projection<T>     |<--------------+
 //  +-------------------+               |
 //          |                           |
 //          v                           |
-//  +-------------------------------------------------+
-//  |   Orthographic : ProjectionBase<Orthographic>   |
-//  +-------------------------------------------------+
+//  +---------------------------------------------+
+//  |   Orthographic : Projection<Orthographic>   |
+//  +---------------------------------------------+
 //
-// We define three spaces that we think of geometry in:
+//
+// Details
+// ───────
+//
+// We define three coordinate spaces for geometry:
 //
 //   world  - Cartesian space in three dimensions after rotation is applied.
 //   unit   - Cartesian space centered on 0,0 without scaling, after projecting.
 //   screen - Cartesian space in pixels, translated and scaled to the window.
 //
 // The visible region in unit space is always a rectangular region centered on
-// (0,0).  This region can be any width or height, but the aspect ratio is
+// (0, 0).  This region can be any width or height, but the aspect ratio is
 // always the same as the window.  The smaller of the two dimensions is taken to
-// map to the range [-1,1], with the other dimension scaled equivalently.
+// map to the range [-1, 1], with the other dimension scaled equivalently.
 //
-// The Projection class implements the logic required to translate from unit
-// space to screen space using this paradigm, as well as storing an underlying
-// rotation to apply to the sphere before projection, allowing projection
-// subclass-es to share a consistent notion of how the center point of the
-// projection is determined.
+// As an example, the Plate carrée projection has an aspect ratio of 2 (its
+// width is twice its height).  So the height is mapped to the range [-1, 1]
+// and the width to [-2, 2]:
 //
-struct Projection {
+//     +------+------+------+
+//     |      |      |      |
+//     |      | Unit |      |
+//     |      |      |      |
+//     +------+------+------+
+//
+//     ├────────────────────┤
+//             Screen
+//
+// Everything in the screen space centered about the origin is ultimately
+// visible in the window.  As the projection is zoomed in by scaling, the
+// projected image of the unit sphere will grow in unit space, but the visible
+// region won't, giving the zoom effect.
+//
+// We define two transformations that are composed to project to the window:
+//
+//   * WorldToUnit - Converts a rotated point from world space to unit space.
+//   * UnitToScreen - Converts from unit space centered on the origin to screen
+//   space by translating and shifting.
+//
+// Of the two, Projection implementations are only required to define the
+// WorldToUnit transformation (via implementations of Project()).
+//
+
+class IProjection {
+public:
+  // The default distance-squared error (in pixels) when subdividing.
+  static constexpr double kDefaultProjectionError = 1;
+
   // A simple struct to store scale and rotation values for the projection.
   struct Transform {
     Transform() = default;
@@ -142,43 +179,69 @@ struct Projection {
 
   using EdgeList = absl::InlinedVector<S2Shape::Edge, 2>;
 
-  Projection() : viewport_dirty_(true) {}
+  virtual ~IProjection() = default;
 
-  virtual ~Projection() = default;
+  // Resizes screen space to the given dimensions.
+  virtual void Resize(int width, int height) = 0;
 
-  // Gets and sets the dimensions of screen space.
-  virtual void    Resize(int width, int height) = 0;
-  virtual double  width()  const = 0;
-  virtual double  height() const = 0;
+  // Returns the current width of screen space.
+  virtual double width()  const = 0;
+
+  // Returns the current height of screen space.
+  virtual double height() const = 0;
+
+  // Returns a 2D region representing screen space.
   virtual region2 screen() const = 0;
 
-  // Returns an S2Cap covering the viewport.  Generally this will be faster than
-  // getting a full viewport covering via Viewport().
+
+  // Returns an S2Cap covering the viewport.  This is a coarse covering but
+  // generally much faster than getting a full viewport covering via Viewport().
   virtual S2Cap Viewcap() const = 0;
 
-  // Returns a cell covering for the visible region of the sphere.
+
+  // Returns a S2CellUnion cell covering for the visible region of the sphere.
   const S2CellUnion& Viewport() const;
+
 
   // Returns a scale factor between unit and screen space.
   //
   // Any unit vector in unit space will have this length in screen space.
   virtual double unit_scale() const = 0;
 
-  // Set the underlying rotation to apply to the sphere before projection.  This
-  // has the effect of moving the central point of the projection to the new
-  // rotated point.  We can think of rotating the sphere first, and then always
-  // projecting the canonical (-y, z, x) world coordinates to the screen.
-  //
-  // This gives us a consistent way to move the center point of projections.
-  Quaternion rotation() const { return transform_.rotation(); }
-  void SetRotation(const Quaternion& q) {
-    SetTransform(Transform(transform_.scale(), q));
+
+  // Returns the un-rotated image of the point (1, 0, 0).  This is the center
+  // point of the projection on the unit sphere.  It will always be mapped to
+  // (0, 0) in unit space.
+  S2Point nadir() const {
+    return nadir_;
   }
+
+
+  // Sets the rotation to apply to points before projection.  This has the
+  // effect of moving the nadir() point.
+  void set_rotation(const Quaternion& q) {
+    set_transform(Transform(transform_.scale(), q));
+  }
+
+  // Returns the current rotation.
+  Quaternion rotation() const { return transform_.rotation(); }
+
+
+  // Sets the scale factor to apply when projecting points.  This has the effect
+  // of 'zooming' around the nadir() point.
+  void set_scale(double scale) {
+    set_transform(Transform(scale, transform_.rotation()));
+  }
+
+  // Returns the current scale factor.
+  double scale() const { return transform_.scale(); }
+
 
   // Pushes the current transform onto a stack; must pair with PopTransform().
   void PushTransform() {
     transforms_.emplace_back(transform_);
   }
+
 
   // Pops a transform off of the stack, restoring the projection state.
   bool PopTransform() {
@@ -186,108 +249,173 @@ struct Projection {
       return false;
     }
 
-    SetTransform(transforms_.back());
+    set_transform(transforms_.back());
     transforms_.pop_back();
     return true;
   }
 
-  // Get and set the scale factor for the projection.
-  double scale() const { return transform_.scale(); }
-  void   SetScale(double scale) {
-    SetTransform(Transform(scale, transform_.rotation()));
-  }
-
-  // Returns the un-rotated image of the point (1,0,0).  This is the center
-  // point of the projection on the unit sphere.  It will always be mapped to
-  // the origin in unit space.
-  S2Point nadir() const { return nadir_; }
 
   // An optional transformation to make to the geometry before rotation.
-  // By default this does nothing but it's useful for some projections.
-  virtual S2Point BeforeRotate(const S2Point& pnt) const { return pnt; }
+  virtual S2Point BeforeRotate(S2Point point) const = 0;
 
   // Rotate or unrotate a point using the current rotation().  These are meant
   // to be inverses i.e.
   //
-  //       Rotate(Unrotate(pnt)) == pnt
-  //   and Unrotate(Rotate(pnt)) == pnt.
+  //       Rotate(Unrotate(point)) == point
+  //   and Unrotate(Rotate(point)) == point
   //
-  S2Point Rotate(S2Point pnt) const { return transform_.RotateFwd(pnt); }
-  S2Point Unrotate(S2Point pnt) const { return transform_.RotateInv(pnt); }
+  // Though slight numerical error might make the results slightly non-equal.
+  S2Point Rotate(S2Point point) const { return transform_.RotateFwd(point); }
+  S2Point Unrotate(S2Point point) const { return transform_.RotateInv(point); }
+
+
+  // Converts a point from world space to unit space.
+  virtual R2Point WorldToUnit(S2Point) const = 0;
 
   // Converts a point from unit space back to world space.  If the inverse
-  // projection of the point hits the unit sphere, out is set to that point and
-  // true is returned.
+  // projection of the point hits the unit sphere, then that point is returned.
   //
-  // Otherwise, if nearest is true, then we project the point onto the closest
-  // visible point on the sphere and return true.
-  virtual bool UnitToWorld(S2Point& out,
-    const R2Point&, bool nearest=false) const = 0;
+  // Otherwise, if 'nearest' is true, then the point is project onto the closest
+  // visible point on the unit sphere.
+  virtual bool UnitToWorld( //
+    absl::Nonnull<S2Point *> out, R2Point point, bool nearest) const = 0;
 
-  // Converts a point from world space back to unit space.
-  virtual R2Point WorldToUnit(const S2Point& p) const = 0;
+  // Converts a point between unit and screen space.
+  virtual R2Point UnitToScreen(R2Point) const = 0;
+  virtual R2Point ScreenToUnit(R2Point) const = 0;
 
-  // Convert a point between unit and screen space.
-  virtual R2Point UnitToScreen(R2Point p) const = 0;
-  virtual R2Point ScreenToUnit(R2Point p) const = 0;
 
-  // Populates a shape with the outline of the projected area in screen space.
-  virtual R2Shape Outline(R2Shape shape={}) const = 0;
+  // Clears a provided R2Shape and fills it with the outline of the projected
+  // unit sphere in screen space.
+  //
+  // Returns a reference to the passed R2Shape.
+  virtual R2Shape& MakeOutline(absl::Nonnull<R2Shape*> out) const = 0;
 
-  // Populates a path with a graticule showing lines of latitude and longitude.
-  virtual R2Shape MakeGraticule(R2Shape shape={}) const = 0;
+
+  // Clears a provided R2Shape and fills it with a graticule showing lines of
+  // latitude and longitude.
+  //
+  // Returns a reference to the passed R2Shape.
+  virtual R2Shape& MakeGraticule(absl::Nonnull<R2Shape*> out) const = 0;
+
 
   // Projects a point from world space to screen space.
-  virtual R2Point Project(const S2Point& pnt) const = 0;
+  //
+  // Does not distinguish between visible and non-visible points.  Edges should
+  // be Clip()-ed to the projection boundary to ensure only visible points are
+  // projected.
+  virtual R2Point Project(S2Point) const = 0;
 
-  // Clips and projects an entire shape into screen space.
+
+  // Projects an entire S2Shape into screen space, returning a polygon with its
+  // edges clipped, stitched and subdivided as needed.
   //
   // Implementations must maintain polygon closure when interiors are clipped
   // across projection boundaries by Stitch()-ing edges that cross the boundary
   // together.
-  virtual R2Shape Project(const S2Shape& shape, R2Shape r2shape={}) const = 0;
-
-  // Project an S2Cap into screen space, returning a polygon subdivided as
-  // needed to meet the requested tolerance (in pixels).
-  virtual R2Shape Project(
-    const S2Cap& cap, double tol=1, R2Shape r2shape={}) const = 0;
-
-  // Tries to transform a point from screen space back to world space.
   //
-  // Not all points in screen space are invertible, so this returns the result
-  // (if any) through a parameter and returns true on success.
-  virtual bool Unproject(S2Point& out, const R2Point& pnt, bool nearest=false) const = 0;
+  // max_sq_error is the maximum -squared- error between the true projection of
+  // the shape's edges and the edges in screen space, in pixels.
+  //
+  // The projected geometry is appended to the provided R2Shape.
+  //
+  // Returns a reference to the passed R2Shape.
+  virtual R2Shape& Project(absl::Nonnull<R2Shape *> out,  //
+    const S2Shape& shape, double max_sq_error) const = 0;
 
-  // Takes an S2Shape edge and clips it to the portion of the sphere currently
-  // visible in the projection.  If need be, the edge is broken into multiple
-  // disconnected parts and added to the given vector.
-  //
-  // Returns an EdgeList instance containing the edge pieces.  Optionally
-  // supports moving an edge list in, in which case it will be re-used and
-  // returned again by moving it into the return value.
-  virtual EdgeList Clip(S2Shape::Edge edge, EdgeList edges={}) const = 0;
 
-  // Takes two vertices that are presumed to have been clipped to the visible
-  // portion of the projection using Clip() and converts them into screen space
-  // and connects the first to the second with a series of lines along the
-  // projection boundary.  Appends the points to the given shape.
+  // Projects an S2Cap into screen space, returning a polygon with its edges
+  // clipped, stitched and subdivided as needed.
   //
-  // The second vertex isn't added to the path so that this function may be used
-  // to stitch together a chain of edges during projection.
-  virtual void Stitch(R2Shape&, const S2Point&, const S2Point&) const = 0;
+  // max_sq_error is the maximum -squared- error between the true projection of
+  // the shape's edges and the edges in screen space, in pixels.
+  //
+  // The projected geometry is appended to the provided R2Shape.
+  //
+  // Returns a reference to the passed R2Shape.
+  virtual R2Shape& Project(absl::Nonnull<R2Shape *> out,  //
+    const S2Cap& cap, double max_sq_error) const = 0;
 
-  // Subdivides an edge in screen space to minimize distortion due to curvature.
+
+  // Transforms a point from screen space back to world space, if possible.
   //
-  // Takes an edge that's assumed to be clipped to the visible region on the
-  // screen with Clip().  Recursively subdivides each half of the edge until the
-  // distance from the actual edge in screen space is less than the tolerance,
-  // putting points into the output as it goes.
+  // If unprojecting the point onto the unit sphere is possible, then the
+  // unprojected point is returned.
   //
-  // By default the last point is not added to the shape so that this function
-  // can be used to tessellate a chain of edges.  This can be overridden by
-  // passing add_last = true.
-  virtual void Subdivide(R2Shape&,
-    const S2Shape::Edge& edge, double tol=1, bool add_last=false) const = 0;
+  // Otherwise, if 'nearest' is true, stores the nearest visible point on the
+  // sphere and returns true.
+  //
+  // Otherwise, returns false.
+  virtual bool Unproject(absl::Nonnull<S2Point *> out,  //
+    R2Point point, bool nearest) const = 0;
+
+
+  // Clips an S2Shape edge to the visible portion of the sphere.  If need be,
+  // the edge is broken into multiple disconnected parts and added to the given
+  // vector.
+  //
+  // Returns a reference to the passed EdgeList.
+  virtual EdgeList& Clip(absl::Nonnull<EdgeList *> edges,  //
+    const S2Shape::Edge& edge) const = 0;
+
+
+  // Takes two vertices that are presumed to have been clipped via Clip(),
+  // converts them into screen space and connects v1 to v0 with a series of
+  // lines along the projection boundary.
+  //
+  // v0 isn't added to the path so that this function may be used to stitch
+  // together a chain of edges during projection.
+  //
+  // The stitched geometry is appended to the provided R2Shape.
+  //
+  // Returns a reference to the passed R2Shape.
+  virtual R2Shape& Stitch(absl::Nonnull<R2Shape *> out,  //
+    const S2Point& v1, const S2Point& v0) const = 0;
+
+
+  // Takes an S2Shape::Edge, and subdivides it as needed to achieve a maximum
+  // error in post-projection distortion due to edge curvature.
+  //
+  // The edges is assumed to have been produced by Clip().  The edge is then
+  // recursively subdivided Norm2() distance from the actual edge in screen
+  // space is less than max_sq_error, storing projected points into the output
+  // as it goes.
+  //
+  // By default the last vertex of the edge is not added to the shape so that
+  // this function can be used to tessellate a chain of edges.  This can be
+  // overridden by passing add_last = true.
+  //
+  // max_sq_error is the maximum -squared- error between the true projection of
+  // the shape's edges and the edges in screen space, in pixels.
+  //
+  // The subdivided geometry is appended to the provided R2Shape.
+  // Returns a reference to the passed R2Shape.
+  virtual R2Shape& Subdivide(absl::Nonnull<R2Shape *> out,
+    const S2Shape::Edge&, bool add_last, double max_sq_error) const = 0;
+
+
+  // Overloads that provide default values for parameters.  We can't use default
+  // parameters with virtual methods so we provide these instead.
+  bool UnitToWorld(absl::Nonnull<S2Point *> out, R2Point point) const {
+    return UnitToWorld(out, point, false);
+  }
+
+  R2Shape& Project(absl::Nonnull<R2Shape *> out, const S2Shape &shape) const {
+    return Project(out, shape, kDefaultProjectionError);
+  }
+
+  R2Shape& Project(absl::Nonnull<R2Shape *> out, const S2Cap &cap) const {
+    return Project(out, cap, kDefaultProjectionError);
+  }
+
+  bool Unproject(absl::Nonnull<S2Point *> out, R2Point point) const {
+    return Unproject(out, point, false);
+  }
+
+  R2Shape& Subdivide(absl::Nonnull<R2Shape *> out,  //
+    const S2Shape::Edge& edge, bool add_last = false) const {
+    return Subdivide(out, edge, add_last, kDefaultProjectionError);
+  }
 
 protected:
   // Called on changes to scale, size, and rotation.
@@ -295,7 +423,7 @@ protected:
 
 private:
   // Sets the current transform for the projection.
-  void SetTransform(Transform transform) {
+  void set_transform(Transform transform) {
     transform_ = std::move(transform);
     nadir_ = transform_.RotateInv(S2Point(1,0,0));
 
@@ -318,26 +446,30 @@ private:
 
   // Current viewport cell union and a mutex so we can generate it lazily.
   mutable absl::Mutex viewport_lock_;
-  mutable bool viewport_dirty_  ABSL_GUARDED_BY(viewport_lock_);
+  mutable bool viewport_dirty_ = true; ABSL_GUARDED_BY(viewport_lock_);
   mutable S2CellUnion viewport_ ABSL_GUARDED_BY(viewport_lock_);
 };
 
-// Partial implementation of Projection that provides default implementations
-// for things such as subdivide and point projection with the benefit of knowing
-// the derived type.  The compiler can use that knowledge to inline function
-// calls and improve performance, but will still get the benefit of a virtually
-// dispatched function.
+// A partial implementation of IProjection that provides default implementations
+// for things such as Subdivide() and Project() with the benefit of knowing the
+// derived type.  The compiler can use that knowledge to inline function calls
+// and improve performance, but will still get the benefit of a virtually
+// dispatched interface.
 //
 // Individual projection implementations should inherit from this class.
 template <typename D>
-struct ProjectionBase : Projection {
-  // The aspect ratio of the projection is width/height.  Projection
+class Projection : public IProjection {
+public:
+  using IProjection::Project;
+  using IProjection::Unproject;
+
+  // The aspect ratio of the projection is defined as width/height.  Projection
   // implementations can define their own static constant if they need a ratio
   // other than the default 1:1.
   static constexpr double kAspectRatio = 1.0;
 
   // The natural scale of a projection is a multiple of the space needed to fit
-  // a unit circle on screen, along a single dimension.  E.g. if we project into
+  // a unit circle on screen, along a single dimension.  E.g. if we project onto
   // the faces of a cube, then we may need sqrt(2) additional scale to fit the
   // cube within the unit circle.
   //
@@ -353,46 +485,26 @@ struct ProjectionBase : Projection {
     return region2(0, 0, width(), height());
   }
 
-  virtual S2Cap Viewcap() const override;
-
-  // Returns a scale factor between unit and screen space.
-  //
-  // Any unit vector in unit space will have this length in screen space.
   double unit_scale() const final { return unit_scale_; }
+  R2Point UnitToScreen(R2Point p) const final { return unit_to_screen_*p; }
+  R2Point ScreenToUnit(R2Point p) const final { return screen_to_unit_*p; }
 
-  // Transforms a point from unit space to screen space.
-  virtual R2Point UnitToScreen(R2Point p) const override {
-    return unit_to_screen_*p;
-  }
 
-  // Transforms a point from screen space to unit space.
-  virtual R2Point ScreenToUnit(R2Point p) const override {
-    return screen_to_unit_*p;
-  }
+  virtual S2Cap Viewcap() const override;
+  virtual S2Point BeforeRotate(S2Point point) const { return point; }
+  virtual R2Point Project(S2Point pnt) const override;
 
-  // Projects an S2Point into screen space.
-  virtual R2Point Project(const S2Point& pnt) const override;
+  virtual R2Shape& Project(absl::Nonnull<R2Shape *> out,
+    const S2Shape& shape, double max_sq_error) const override;
 
-  // Attempts to project a point in screen space back to an S2Point.
-  //
-  // Not all screen space points may intersect the sphere.  If the point misses
-  // this function returns false, otherwise it returns true and sets out to the
-  // unprojected point on the sphere.
-  virtual bool Unproject(S2Point& out, const R2Point& pnt, bool nearest=false) const override;
+  virtual R2Shape& Project(absl::Nonnull<R2Shape *> out,
+    const S2Cap& cap, double max_sq_error) const override;
 
-  // Project an entire S2Shape into screen space.  Takes care to Clip() and
-  // Stitch() edges that leave the projection entirely.
-  virtual R2Shape Project(const S2Shape& shape, R2Shape r2shape={}) const override;
+  virtual bool Unproject(
+    absl::Nonnull<S2Point *>, R2Point point, bool nearest) const override;
 
-  // Project an S2Cap into screen space, returning a polygon subdivided as
-  // needed to meet the requested tolerance (in pixels).
-  virtual R2Shape Project(
-    const S2Cap& cap, double tol=1, R2Shape r2shape={}) const override;
-
-  // Subdivides an S2Shape::Edge up to the given tolerance and appends it to the
-  // given R2Shape.
-  virtual void Subdivide(R2Shape& out,
-    const S2Shape::Edge& edge, double tol=1, bool add_last=false) const override;
+  virtual R2Shape& Subdivide(absl::Nonnull<R2Shape *> out,  //
+    const S2Shape::Edge&, bool add_last, double max_sq_error) const override;
 
 private:
   // Cast back to the Derived class.
@@ -407,8 +519,8 @@ private:
   //
   // By passing the projected endpoints as parameters, we're able to eliminate
   // the need to re-project points
-  void Subdivide(R2Shape& out,
-    S2Shape::Edge s2edge, R2Shape::Edge r2edge, double tol) const;
+  void Subdivide(absl::Nonnull<R2Shape*> out,  //
+    S2Shape::Edge s2edge, R2Shape::Edge r2edge, double max_sq_error) const;
 
   int width_;
   int height_;
@@ -421,11 +533,11 @@ private:
 
 // Recursively bisect an unprojected edge to find the distance from a point.
 template <typename Derived>
-inline S1ChordAngle ProjectionBase<Derived>::R2EdgeDistance(
+inline S1ChordAngle Projection<Derived>::R2EdgeDistance(
   R2Point v0, R2Point v1, S2Point center, S1ChordAngle dist) const {
   S2Point p0, p1;
-  bool got0 = Unproject(p0, v0, true);
-  bool got1 = Unproject(p1, v1, true);
+  bool got0 = Unproject(&p0, v0, true);
+  bool got1 = Unproject(&p1, v1, true);
 
   if (got0) dist = std::max(dist, S1ChordAngle::Radians(p0.Angle(center)));
   if (got1) dist = std::max(dist, S1ChordAngle::Radians(p1.Angle(center)));
@@ -434,7 +546,7 @@ inline S1ChordAngle ProjectionBase<Derived>::R2EdgeDistance(
   R2Point vc = v0 + (v1-v0)*0.5;
   S2Point pc;
 
-  if (Unproject(pc, vc)) {
+  if (Unproject(&pc, vc)) {
     S1ChordAngle vc_dist = S1ChordAngle::Radians(pc.Angle(center));
     if (vc_dist > dist) {
       dist = vc_dist;
@@ -445,8 +557,9 @@ inline S1ChordAngle ProjectionBase<Derived>::R2EdgeDistance(
   return dist;
 }
 
+
 template <typename Derived>
-inline S2Cap ProjectionBase<Derived>::Viewcap() const {
+inline S2Cap Projection<Derived>::Viewcap() const {
   S1ChordAngle radius = S1ChordAngle::Zero();
   for (int side=0; side < 4; ++side) {
     const R2Point v0 = screen().GetVertex(side);
@@ -457,8 +570,9 @@ inline S2Cap ProjectionBase<Derived>::Viewcap() const {
   return S2Cap(nadir(), radius);
 }
 
+
 template <typename Derived>
-inline void ProjectionBase<Derived>::Resize(int width, int height) {
+inline void Projection<Derived>::Resize(int width, int height) {
   width_ = width;
   height_ = height;
 
@@ -482,27 +596,30 @@ inline void ProjectionBase<Derived>::Resize(int width, int height) {
   UpdateTransforms();
 }
 
+
 template <typename Derived>
-inline void ProjectionBase<Derived>::Subdivide(R2Shape& out,
-  const S2Shape::Edge& edge, double tol, bool add_last) const {
+inline R2Shape& Projection<Derived>::Subdivide(absl::Nonnull<R2Shape*> out,
+  const S2Shape::Edge& edge, bool add_last, double max_sq_error) const {
 
   R2Point p0 = projection().Project(edge.v0);
   R2Point p1 = projection().Project(edge.v1);
 
-  out.Append(p0);
-  if ((p1-p0).Norm2() > tol*tol) {
-    Subdivide(out, edge, {p0, p1}, tol);
+  out->Append(p0);
+  if ((p1-p0).Norm2() > max_sq_error) {
+    Subdivide(out, edge, {p0, p1}, max_sq_error);
   }
 
   if (add_last) {
-    out.Append(p1);
+    out->Append(p1);
   }
+
+  return *out;
 }
 
 
 template <typename Derived>
-inline void ProjectionBase<Derived>::Subdivide(R2Shape& out,
-  S2Shape::Edge s2edge, R2Shape::Edge r2edge, double tol) const {
+inline void Projection<Derived>::Subdivide(absl::Nonnull<R2Shape*> out,
+  S2Shape::Edge s2edge, R2Shape::Edge r2edge, double max_sq_error) const {
 
   // Compute a point halfway along the edge.
   S2Point v2 = S2::Interpolate(s2edge.v0, s2edge.v1, 0.5);
@@ -515,16 +632,16 @@ inline void ProjectionBase<Derived>::Subdivide(R2Shape& out,
 
   // If we're too far from the line, recursively subdivide the first half and
   // the second half.
-  if (dist2 > tol*tol) {
-    Subdivide(out, {s2edge.v0, v2}, {r2edge.v0, p2}, tol);
-    out.Append(p2);
-    Subdivide(out, {v2, s2edge.v1}, {p2, r2edge.v1}, tol);
+  if (dist2 > max_sq_error) {
+    Subdivide(out, {s2edge.v0, v2}, {r2edge.v0, p2}, max_sq_error);
+    out->Append(p2);
+    Subdivide(out, {v2, s2edge.v1}, {p2, r2edge.v1}, max_sq_error);
   }
 }
 
 
 template <typename Derived>
-inline R2Point ProjectionBase<Derived>::Project(const S2Point& pnt) const {
+inline R2Point Projection<Derived>::Project(S2Point pnt) const {
   return projection().UnitToScreen(
     projection().WorldToUnit(
       projection().Rotate(
@@ -533,10 +650,9 @@ inline R2Point ProjectionBase<Derived>::Project(const S2Point& pnt) const {
 
 
 template <typename Derived>
-bool ProjectionBase<Derived>::Unproject(S2Point& out, const R2Point& pnt, bool nearest) const {
-  S2Point ans;
-  if (projection().UnitToWorld(ans, projection().ScreenToUnit(pnt), nearest)) {
-    out = projection().Unrotate(ans);
+bool Projection<Derived>::Unproject(absl::Nonnull<S2Point*> out, R2Point pnt, bool nearest) const {
+  if (projection().UnitToWorld(out, projection().ScreenToUnit(pnt), nearest)) {
+    *out = projection().Unrotate(*out);
     return true;
   }
   return false;
@@ -544,15 +660,15 @@ bool ProjectionBase<Derived>::Unproject(S2Point& out, const R2Point& pnt, bool n
 
 
 template <typename Derived>
-R2Shape ProjectionBase<Derived>::Project(const S2Shape& shape, R2Shape r2shape) const {
-  r2shape.clear();
-
+R2Shape& Projection<Derived>::Project(absl::Nonnull<R2Shape*> out, const S2Shape& shape, double max_sq_error) const {
   for (int chain=0; chain < shape.num_chains(); ++chain) {
     S2Point head, tail;
     bool found_point = false;
 
+    IProjection::EdgeList edges;
     for (int i=0; i < shape.chain(chain).length; ++i) {
-      for (const S2Shape::Edge& edge : Clip(shape.chain_edge(chain, i))) {
+      Clip(&edges, shape.chain_edge(chain, i));
+      for (const S2Shape::Edge& edge : edges) {
         if (!found_point) {
           found_point = true;
           head = edge.v0;
@@ -562,33 +678,35 @@ R2Shape ProjectionBase<Derived>::Project(const S2Shape& shape, R2Shape r2shape) 
         // We went out of the clip region and came back in, stitch a path along
         // the boundary between the vertices to close it back up.
         if (tail != edge.v0) {
-          Stitch(r2shape, tail, edge.v0);
+          Stitch(out, tail, edge.v0);
         }
-        Subdivide(r2shape, edge, 0.5);
 
+        Subdivide(out, edge, false, max_sq_error);
         tail = edge.v1;
       }
     }
 
     if (found_point) {
-      r2shape.Append(Project(tail));
+      out->Append(Project(tail));
 
       // If we didn't land back on the first vertex after going around the
       // chain, it's because we went over the clip edge, stitch a path between
       // them to close the polygon.
       if (tail != head) {
-        Stitch(r2shape, tail, head);
+        Stitch(out, tail, head);
       }
     }
 
-    r2shape.EndChain();
+    out->EndChain();
   }
-  return r2shape;
+
+  return *out;
 }
 
+
 template <typename Derived>
-R2Shape ProjectionBase<Derived>::Project(
-  const S2Cap& cap, double tol, R2Shape r2shape) const {
+R2Shape& Projection<Derived>::Project(
+  absl::Nonnull<R2Shape*> out, const S2Cap& cap, double max_sq_error) const {
 
   // Find the center point of the cap and UV vectors forming a basis for points
   // along the cap boundary.
@@ -617,7 +735,7 @@ R2Shape ProjectionBase<Derived>::Project(
 
     // When we project the two different mid points, recurse if they're too far
     // apart in screen space.
-    if ((Project(pmid)-Project(interp)).Norm2() > tol*tol) {
+    if ((Project(pmid)-Project(interp)).Norm2() > max_sq_error) {
       self(a0, p0, amid, pmid, self);
       self(amid, pmid, a1, p1, self);
     } else {
@@ -633,10 +751,8 @@ R2Shape ProjectionBase<Derived>::Project(
   }
   points.emplace_back(CapPoint(0));
 
-  // Now project the S2Shape into screen space wholesale.  This will handle any
-  // clipping needed.
-  S2LaxPolylineShape shape(points);
-  return Project(shape, std::move(r2shape));
+  // Now project the S2Shape into screen space wholesale.
+  return Project(out, S2LaxPolylineShape(points));
 }
 
 

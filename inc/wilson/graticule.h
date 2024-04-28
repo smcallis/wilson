@@ -22,13 +22,14 @@
 
 namespace w {
 
-// Populates a path with an S2 graticule where the grid lines are the boundaries
-// of S2Cells up to a certain level.  E.g. S2Graticule(0) will only return the
-// outlines of the faces, S2Graticule(1) includes level 1 cell boundaries.
+// Populates an R2Shape with an S2 graticule where the grid lines are the
+// boundaries of S2Cells up to a certain level.  E.g. S2Graticule(0) will only
+// return the outlines of the faces, S2Graticule(1) includes level 1 cell
+// boundaries.
 //
-// Levels are independent paths so this may be iterated over to build up levels
-// to draw in one draw command.
-inline R2Shape S2Graticule(const Projection& proj, int level, R2Shape shape={}) {
+// Any existing path information is cleared.
+inline void S2Graticule(absl::Nonnull<R2Shape *> out, const IProjection &proj,
+                        int level) {
   // Clip edges to the spherical cap bounding the viewport first thing.  This
   // well prevent us from trying to subdivide parts of edges that aren't even
   // visible.
@@ -36,12 +37,15 @@ inline R2Shape S2Graticule(const Projection& proj, int level, R2Shape shape={}) 
   Plane clip {cap.center(), (1-cap.height())*cap.center()};
   bool clip_cap = cap.radius() < S1ChordAngle::Right();
 
+  IProjection::EdgeList edges;
+
   // Projects and subdivides an S2Shape edge and appends it to the path.
   const auto AppendEdgeToShape = [&](S2Shape::Edge edge) {
     if (!clip_cap || clip.ClipEdgeOnSphere(edge)) {
-      for (const S2Shape::Edge& edge : proj.Clip(edge)) {
-        proj.Subdivide(shape, edge, 0.25, true);
-        shape.EndChain();
+      proj.Clip(&edges, edge);
+      for (const S2Shape::Edge& edge : edges) {
+        proj.Subdivide(out, edge, 0.25, true);
+        out->EndChain();
       }
     }
   };
@@ -87,7 +91,7 @@ inline R2Shape S2Graticule(const Projection& proj, int level, R2Shape shape={}) 
     AppendEdgeToShape({vertices[1], vertices[3]});
   };
 
-  shape.clear();
+  out->clear();
   if (level <= 0) {
     // Add bottom/left edges of faces 0 and 1
     for (int face=0; face <= 1; ++face) {
@@ -114,8 +118,12 @@ inline R2Shape S2Graticule(const Projection& proj, int level, R2Shape shape={}) 
       AddCellBoundaries(cell, AddCellBoundaries);
     }
   }
+}
 
-  return shape;
+inline R2Shape S2Graticule(const IProjection& proj, int level) {
+  R2Shape out;
+  S2Graticule(&out, proj, level);
+  return out;
 }
 
 } // namespace w

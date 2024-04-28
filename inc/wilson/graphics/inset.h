@@ -57,7 +57,7 @@ public:
 
   // Sets the rotation value for the inset.
   void SetRotation(const Quaternion& rotation) {
-    projection_->SetRotation(rotation);
+    projection_->set_rotation(rotation);
   }
 
   // Sets the position of the top-left corner of the inset.
@@ -72,9 +72,9 @@ public:
   }
 
   // Redraws the inset, highlighting information from the active projection.
-  void Redraw(BLContext& ctx, const Projection& projection) {
+  void Redraw(BLContext& ctx, const IProjection& projection) {
     // Draw to the texture pixbuffer using a new context.
-    R2Shape outline = projection_->Outline();
+    projection_->MakeOutline(&outline_);
     {
       BLContext ctx;
       ctx.begin(texture_.image());
@@ -84,30 +84,29 @@ public:
 
       // Clear the on-screen outline of the sphere.
       ctx.setFillStyle(pixel(0xffe6ecee));
-      ctx.fillPath(outline.path());
+      ctx.fillPath(outline_.path());
 
       ctx.setFillStyle(pixel(0xff777777));
 
       timeit("fill", "Time to fill land", [&]() {
+        r2shape_.clear();
         const S2ShapeIndex& index = internal::GetSimplifiedLandIndex();
-        R2Shape r2shape;
         for (const S2Shape* shape : index) {
-          r2shape = projection_->Project(*shape, std::move(r2shape));
-          r2shape = Simplify(std::move(r2shape));
-          ctx.fillPath(r2shape.path());
+          projection_->Project(&r2shape_, *shape);
         }
+
+        Simplify(&simplified_, r2shape_);
+        ctx.fillPath(simplified_.path());
       });
 
       // Draw graticules.
-      R2Shape path;
       ctx.setStrokeStyle(pixel(0xffd0d0d0));
-
       timeit("graticules", "Time to draw graticules", [&]() {
         constexpr int kNlevel = 4;
         for (int level=kNlevel-1; level >= 0; --level) {
-          path = S2Graticule(*projection_.get(), level, std::move(path));
+          S2Graticule(&r2shape_, *projection_.get(), level);
           ctx.setStrokeWidth(3-2.5*(double)level/(kNlevel-1));
-          ctx.strokePath(path.path());
+          ctx.strokePath(r2shape_.path());
         }
       });
 
@@ -116,23 +115,23 @@ public:
       // Convert the viewport into a polygon.  Note we have to check whether the
       // output polygon has significantly less area than the cell union and flip
       // it because it doesn't maintain orientation for very full cell unions.
-      R2Shape shapes;
+      r2shape_.clear();
       for (S2CellId cell : projection.Viewport()) {
         S2Polygon polygon{S2Cell(cell)};
-
-        R2Shape shape = projection_->Project(S2Polygon::Shape(&polygon));
-        shapes.Append(shape);
+        projection_->Project(&r2shape_, S2Polygon::Shape(&polygon));
       }
 
       ctx.setStrokeStyle(pixel(0x77800000));
       ctx.setStrokeWidth(1);
-      ctx.fillPath(shapes.path());
+      ctx.fillPath(r2shape_.path());
 
       // Draw the viewcap outline.
+      r2shape_.clear();
       ctx.setStrokeStyle(pixel(0xff00316e));
       ctx.setStrokeWidth(1);
-      ctx.strokePath(
-        projection_->Project(projection.Viewcap(), 0.1).path());
+
+      projection_->Project(&r2shape_, projection.Viewcap(), 0.1);
+      ctx.strokePath(r2shape_.path());
     }
 
     // Refill the outline using the texture as a source, this will remove any
@@ -142,14 +141,19 @@ public:
     ctx.save();
     ctx.setCompOp(BL_COMP_OP_SRC_COPY);
     ctx.setFillStyle(texture);
-    ctx.fillPath(outline.path());
+    ctx.fillPath(outline_.path());
     ctx.restore();
   }
 
 private:
-  std::unique_ptr<Projection> projection_;
+  std::unique_ptr<IProjection> projection_;
   vec2i pos_ = vec2i(0,0);
   Pixbuffer texture_;
+
+  // Storage for shapes.
+  R2Shape outline_;
+  R2Shape r2shape_;
+  R2Shape simplified_;
 };
 
 }  // namespace w

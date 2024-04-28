@@ -40,12 +40,11 @@
 
 namespace w {
 
-struct Cubic final : ProjectionBase<Cubic> {
+struct Cubic final : Projection<Cubic> {
   // Include Project function explicitly to have visibility with our overloads.
-  using ProjectionBase::Project;
+  using Projection::Project;
 
-  // We have to expand the scale by sqrt(3) to make the cube inscribe into the
-  // unit sphere.
+  // We have to expand the scale by sqrt(3) to inscribe a cube into a sphere.
   static constexpr double kNaturalScale = 1.732;
 
   Cubic() {
@@ -53,28 +52,27 @@ struct Cubic final : ProjectionBase<Cubic> {
   }
 
   // Populates an R2Shape with the outline of the projected sphere on screen.
-  R2Shape Outline(R2Shape shape={}) const override {
-    shape.clear();
+  R2Shape& MakeOutline(absl::Nonnull<R2Shape*> out) const override {
+    out->clear();
     for (const PointAngle& pa : r2outline_) {
-      shape.Append(pa.screen);
+      out->Append(pa.screen);
     }
-    shape.EndChain();
-    return shape;
+    out->EndChain();
+    return *out;
   }
 
   // Populates an R2Shape with a graticule with lines of latitude and longitude.
-  R2Shape MakeGraticule(R2Shape shape={}) const override {
-    shape.clear();
+  R2Shape& MakeGraticule(absl::Nonnull<R2Shape*> out) const override {
+    out->clear();
     //generate_graticule(path);
-    return shape;
+    return *out;
   }
 
   // Clips an edge to the visible portion of the sphere, possibly splitting it
   // into multiple discontinuous pieces if needed.  For a cubic projection this
   // is equivalent to clipping edges to the (at most) 3 visible faces.
-  EdgeList Clip(S2Shape::Edge edge, EdgeList edges={}) const override {
-    using std::swap;
-    edges.clear();
+  EdgeList& Clip(absl::Nonnull<EdgeList*> edges, const S2Shape::Edge& edge) const override {
+    edges->clear();
 
     // When an edge crosses between face cells, we may get slightly different
     // endpoint for the edge segments due to numerical error, if that happens we
@@ -99,7 +97,7 @@ struct Cubic final : ProjectionBase<Cubic> {
       if (S2::ClipToFace(edge.v0, edge.v1, face.id, &uv0, &uv1)) {
         // The edge hit the face, so convert the clipped vertices back to XYZ
         // space and normalize them to be unit magnitude points.
-        edges.emplace_back(
+        edges->emplace_back(
           S2::FaceUVtoXYZ(face.id, uv0).Normalize(),
           S2::FaceUVtoXYZ(face.id, uv1).Normalize()
         );
@@ -108,13 +106,9 @@ struct Cubic final : ProjectionBase<Cubic> {
         bool too_close0 = WithinEdgeError(uv0);
         bool too_close1 = WithinEdgeError(uv1);
 
-        // Neither one was, which means that the edge must have been contained
-        // entirely by this face, so we're done, score.
-        if (!too_close0 && !too_close1) {
-          return edges;
-        } else {
-          // One or both was too close.  If the edges are horizontal or vertical
-          // then we need to de-duplicate the results.
+        // If either was too close.  If the edges are horizontal or vertical
+        // then we need to de-duplicate the results.
+        if (too_close0 || too_close1) {
           dedup |= std::fabs(uv0.x()-uv1.x()) < 2*S2::kEdgeClipErrorUVCoord;
           dedup |= std::fabs(uv0.y()-uv1.y()) < 2*S2::kEdgeClipErrorUVCoord;
         }
@@ -125,8 +119,8 @@ struct Cubic final : ProjectionBase<Cubic> {
     // contained by the face, so we can just return the edge.  This is a very
     // common case, most of the time edges will not cross faces, and it will let
     // us avoid trying to merge segments back together.
-    if (edges.size() <= 1) {
-      return edges;
+    if (edges->size() <= 1) {
+      return *edges;
     }
 
     // Determines if two points are within the merge radius of each other.
@@ -138,14 +132,14 @@ struct Cubic final : ProjectionBase<Cubic> {
     // whose endpoints are closer than some threshold back together before
     // returning.
     const auto MergeEdges = [&]() {
-      for (int i=0; i < edges.size(); ++i) {
-        S2Shape::Edge& e0 = edges[i];
+      for (int i=0; i < edges->size(); ++i) {
+        S2Shape::Edge& e0 = (*edges)[i];
 
-        for (int j=0; j < edges.size(); ++j) {
+        for (int j=0; j < edges->size(); ++j) {
           if (i == j) {
             continue;
           }
-          S2Shape::Edge& e1 = edges[j];
+          S2Shape::Edge& e1 = (*edges)[j];
 
           // Decide whether to merge the edge, either because one is a
           // continuation of the other, or the edge clipped to two faces (rare).
@@ -159,8 +153,8 @@ struct Cubic final : ProjectionBase<Cubic> {
           // iterating.
           if (merge) {
             e0.v1 = e1.v1;
-            swap(edges[j], edges.back());
-            edges.pop_back();
+            std::swap((*edges)[j], edges->back());
+            edges->pop_back();
             return true;
           }
         }
@@ -171,16 +165,14 @@ struct Cubic final : ProjectionBase<Cubic> {
     };
     while (MergeEdges());
 
-    return edges;
-  };
+    return *edges;
+  }
 
   // Takes two vertices presumed to have been generated by Clip() and connects
   // them together, adding segments along the projection boundary as needed.
   // This is used when a chain exits the projection and renters at a later
   // point, we need to put edges along the boundary to close it.
-  void Stitch(R2Shape& out, const S2Point& v1, const S2Point& v0) const override {
-    using std::swap;
-
+  R2Shape& Stitch(absl::Nonnull<R2Shape*> out, const S2Point& v1, const S2Point& v0) const override {
     // How many times A must be incremented to reach B, assuming that we take
     // the value modulo N.
     const auto ModuloDistance = [](int a, int b, int n) {
@@ -208,16 +200,18 @@ struct Cubic final : ProjectionBase<Cubic> {
     // Sweep the shortest path through the vertices.
     const int N = r2outline_.size();
     if (ModuloDistance(end, beg, N) < ModuloDistance(beg, end, N)) {
-      swap(beg, end);
+      std::swap(beg, end);
     }
 
-    out.Append(p1);
+    out->Append(p1);
     for (int i=beg % N; i != end % N; i = (i+1) % N) {
-      out.Append(r2outline_[i].screen);
+      out->Append(r2outline_[i].screen);
     }
+
+    return *out;
   }
 
-  S2Point BeforeRotate(const S2Point& p) const override final { //
+  S2Point BeforeRotate(S2Point p) const override {
     // Dividing each point by its largest magnitude component puts it on one of
     // the six cube faces, but leaves it in 3D Cartesian coordinates.
     return p/std::fabs(p[p.LargestAbsComponent()]);
@@ -225,13 +219,13 @@ struct Cubic final : ProjectionBase<Cubic> {
 
   // Convert from world space to unit space.  We just project orthographically
   // after mapping points to the cube face and drop the Z coordinate.
-  R2Point WorldToUnit(const S2Point& p) const override {
+  R2Point WorldToUnit(S2Point p) const override {
     S2Point proj = world_to_unit_*p;
     return {proj.x(), proj.y()};
   }
 
   // Convert from unit space back to world space.
-  bool UnitToWorld(S2Point& out, const R2Point& pnt, bool nearest=false) const override {
+  bool UnitToWorld(absl::Nonnull<S2Point*> out, R2Point pnt, bool nearest=false) const override {
     // Treat each square face as being composed of an upper and lower triangular
     // half.  We can get barycentric coordinates for the point in each triangle
     // and easily check whether it's contained in the face or not.
@@ -240,8 +234,8 @@ struct Cubic final : ProjectionBase<Cubic> {
       BaryCoord coord = face.lower.ConvertPoint(pnt);
       if (coord.inside()) {
         S2Cell c = S2Cell::FromFace(face.id);
-        out = coord.Evaluate(c.GetVertex(0), c.GetVertex(1), c.GetVertex(2));
-        out = Rotate(out);
+        *out = coord.Evaluate(c.GetVertex(0), c.GetVertex(1), c.GetVertex(2));
+        *out = Rotate(*out);
         return true;
       }
 
@@ -249,8 +243,8 @@ struct Cubic final : ProjectionBase<Cubic> {
       coord = face.upper.ConvertPoint(pnt);
       if (coord.inside()) {
         S2Cell c = S2Cell::FromFace(face.id);
-        out = coord.Evaluate(c.GetVertex(2), c.GetVertex(3), c.GetVertex(0));
-        out = Rotate(out);
+        *out = coord.Evaluate(c.GetVertex(2), c.GetVertex(3), c.GetVertex(0));
+        *out = Rotate(*out);
         return true;
       }
     }
@@ -288,7 +282,7 @@ struct Cubic final : ProjectionBase<Cubic> {
       S2Point A = r2outline_[min_vert].world;
       S2Point B = r2outline_[(min_vert + 1) % N].world;
 
-      out = Rotate(S2::Interpolate(A, B, min_frac));
+      *out = Rotate(S2::Interpolate(A, B, min_frac));
       return true;
     }
 

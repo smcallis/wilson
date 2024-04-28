@@ -28,7 +28,7 @@ namespace w {
 
 struct ProjectionInfo {
   using MakeProjectionFn = absl::AnyInvocable <
-      std::unique_ptr<Projection>(Quaternion rotation, double scale) const>;
+      std::unique_ptr<IProjection>(Quaternion rotation, double scale) const>;
 
   template <typename T>
   static ProjectionInfo Create(  //
@@ -36,8 +36,8 @@ struct ProjectionInfo {
 
     const auto Factory = [](Quaternion rotation, double scale) {
       auto projection = std::make_unique<T>();
-      projection->SetRotation(rotation);
-      projection->SetScale(scale);
+      projection->set_rotation(rotation);
+      projection->set_scale(scale);
       return projection;
     };
 

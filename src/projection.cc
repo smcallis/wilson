@@ -28,7 +28,7 @@ namespace {  // prevent external linkage.
 // viewport in spherical coordinates.
 class S2ViewportRegion : public S2Region {
 public:
-  S2ViewportRegion(const Projection* projection)
+  S2ViewportRegion(const IProjection* projection)
       : projection_(projection) {}
 
   S2ViewportRegion* Clone() const override {
@@ -62,7 +62,7 @@ public:
     // If any screen vertices land inside the cell then they intersect.
     for (int ii=0; ii < 4; ++ii) {
       S2Point corner;
-      if (projection_->Unproject(corner, screen.GetVertex(ii))) {
+      if (projection_->Unproject(&corner, screen.GetVertex(ii))) {
         if (cell.Contains(corner)) {
           return true;
         }
@@ -73,14 +73,15 @@ public:
     // but the cell is close enough it intersected the cap bound), or intersect
     // but only by crossing edges.  Project the cell edge into screen space and
     // look for an edge that crosses.
-    constexpr static double kPixelTolerance = 2;
+    constexpr static double kPixelTolerance = 4;
 
+    IProjection::EdgeList edges;
     R2Shape r2shape;
     for (int ii=0; ii < 4; ++ii) {
       const S2Shape::Edge edge = {cell.GetVertex(ii), cell.GetVertex(ii+1)};
-      for (const S2Shape::Edge& edge : projection_->Clip(edge)) {
+      for (const S2Shape::Edge& edge : projection_->Clip(&edges, edge)) {
         r2shape.clear();
-        projection_->Subdivide(r2shape, edge, kPixelTolerance, true);
+        projection_->Subdivide(&r2shape, edge, true, kPixelTolerance);
 
         for (int jj=0; jj < r2shape.nchains(); ++jj) {
           for (int kk=0; kk < r2shape.chain(jj).length; ++kk) {
@@ -102,7 +103,7 @@ public:
   }
 
 private:
-  const Projection* projection_;
+  const IProjection* projection_;
 
   // Returns true if an R2 edge intersects the screen region.
   static bool EdgeIntersectsScreen(
@@ -140,9 +141,9 @@ private:
 };
 }  // namespace
 
-const S2CellUnion& Projection::Viewport() const {
+const S2CellUnion& IProjection::Viewport() const {
   // Try to just return the current viewport if we have one.
-  {
+  if (!viewport_dirty_) {
     absl::ReaderMutexLock lock(&viewport_lock_);
     if (!viewport_dirty_) {
       return viewport_;

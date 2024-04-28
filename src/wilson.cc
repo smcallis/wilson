@@ -154,7 +154,7 @@ public:
         ImGui::Indent();
 
         S2Point pnt;
-        if (projection_->Unproject(pnt, mouse_)) {
+        if (projection_->Unproject(&pnt, mouse_)) {
           ImGui::Text("Latitude:  %+11.6f", S2LatLng(pnt).lat().degrees());
           ImGui::SameLine(250); ImGui::Text("X: %+f", pnt.x());
 
@@ -257,9 +257,9 @@ public:
     ctx.begin(texture_.image());
 
     // Clear the on-screen outline of the sphere.
-    R2Shape outline = projection_->Outline();
+    projection_->MakeOutline(&outline_);
     ctx.setFillStyle(bg_color_);
-    ctx.fillPath(outline.path());
+    ctx.fillPath(outline_.path());
 
     //s2cell cell(S2CellId::FromToken("14"));
     //S2Cell cell(S2CellId::FromToken("0b"));
@@ -312,8 +312,13 @@ public:
               ProjectedShape& pair = projected_shapes_[shape_id];
               if (dirty_.Get(shape_id)) {
                 dirty_.Set(shape_id, false);
-                pair.r2shape = projection_->Project(*pair.s2shape, std::move(pair.r2shape));
-                pair.r2shape = Simplify(pair.r2shape);
+
+                pair.r2shape.clear();
+                projection_->Project(&pair.r2shape, *pair.s2shape);
+
+                R2Shape simplified;
+                Simplify(&simplified, pair.r2shape);
+                pair.r2shape = simplified;
               }
             }
           });
@@ -373,7 +378,7 @@ public:
         S2Point v2 = std::cos(2*2*M_PI/3)*u + std::sin(2*2*M_PI/3)*v;
 
         absl::InlinedVector<S2Point,4> vertices;
-        Projection::EdgeList clipped;
+        IProjection::EdgeList clipped;
 
         // S2Shape::Edge edges[] = {{
         //     S2LatLng::FromDegrees(0,0).ToPoint(),
@@ -401,7 +406,8 @@ public:
         for (const S2Shape::Edge& edge : edges) {
           printf("piece %d\n", ++i);
 
-          for (S2Shape::Edge clip : projection_->Clip(edge)) {
+          IProjection::EdgeList edges;
+          for (S2Shape::Edge clip : projection_->Clip(&edges, edge)) {
             if (flip) {
               clip.v0 = -clip.v0;
               clip.v1 = -clip.v1;
@@ -410,7 +416,7 @@ public:
             //   clip.v0.x(), clip.v0.y(), clip.v0.z(),
             //   clip.v1.x(), clip.v1.y(), clip.v1.z());
 
-            projection_->Subdivide(shape, clip, 0.25, true);
+            projection_->Subdivide(&shape, clip, 0.25, true);
             shape.EndChain();
             //clipped.emplace_back(clip);
           }
@@ -562,7 +568,7 @@ public:
     ctx.save();
     ctx.setCompOp(BL_COMP_OP_SRC_COPY);
     ctx.setFillStyle(texture);
-    ctx.fillPath(outline.path());
+    ctx.fillPath(outline_.path());
     ctx.restore();
 
     // draw any final overlay text we need last, so that it's on top.
@@ -570,7 +576,7 @@ public:
 
     // Draw lat/lon if we have it.
     S2Point pnt;
-    if (projection_->Unproject(pnt, mouse_, true)) {
+    if (projection_->Unproject(&pnt, mouse_, true)) {
       // DrawText(20, height()-25, pixel(0xffffcc00),
       //   absl::StrFormat("Lat: %+10.6f  Lon: %+11.6f  (%f %f %f)",
       //     S2LatLng(pnt).lat().degrees(),
@@ -583,8 +589,9 @@ public:
 
       if (draw_rule_) {
         R2Shape shape;
-        for (const auto& edge : projection_->Clip({rule_start_, pnt})) {
-          projection_->Subdivide(shape, edge, 0.25, true);
+        IProjection::EdgeList edges;
+        for (const auto& edge : projection_->Clip(&edges, {rule_start_, pnt})) {
+          projection_->Subdivide(&shape, edge, 0.25, true);
           shape.EndChain();
         }
 
@@ -690,8 +697,8 @@ public:
     // lets us find rotations relative to a starting reference frame.
     const auto Unproject = [&](S2Point& out, R2Point pnt, Quaternion rot) {
       projection_->PushTransform();
-      projection_->SetRotation(rot);
-      bool hit = projection_->Unproject(out, pnt);
+      projection_->set_rotation(rot);
+      bool hit = projection_->Unproject(&out, pnt);
       projection_->PopTransform();
       return hit;
     };
@@ -699,7 +706,7 @@ public:
     // Handle scroll wheel events to adjust the zoom.
     if (event.type == SDL_MOUSEWHEEL) {
       S2Point prev, curr;
-      if (projection_->Unproject(prev, mouse_)) {
+      if (projection_->Unproject(&prev, mouse_)) {
         double scale = projection_->scale();
 
         // Be sure to use .preciseY here because when compiling for WASM
@@ -710,17 +717,17 @@ public:
         scale = std::min(std::max(scale, kMinScale), kMaxScale);
 
         // Adjust the projection with the new scale.
-        projection_->SetScale(scale);
+        projection_->set_scale(scale);
         dirty_.SetAll(true);
 
         // Grab the new point under the mouse (if any) and rotate the old
         // position to be under the new position.  This will make it appear
         // we're zooming in-and-out around the mouse point.
-        if (projection_->Unproject(curr, mouse_)) {
+        if (projection_->Unproject(&curr, mouse_)) {
           Quaternion rotation(prev, curr);
           rotation *= projection_->rotation();
 
-          projection_->SetRotation(rotation);
+          projection_->set_rotation(rotation);
           inset_.SetRotation(rotation);
         }
       }
@@ -729,7 +736,7 @@ public:
 
     if (event.type == SDL_MOUSEBUTTONDOWN) {
       if (event.button.button == SDL_BUTTON_LEFT) {
-        if (!dragging_ && projection_->Unproject(mouse_start_, mouse_)) {
+        if (!dragging_ && projection_->Unproject(&mouse_start_, mouse_)) {
           dragging_ = true;
           rot_start_ = projection_->rotation();
         }
@@ -740,7 +747,7 @@ public:
     if (event.type == SDL_MOUSEBUTTONUP) {
       switch (event.button.button) {
         case SDL_BUTTON_RIGHT:
-          draw_rule_ = !draw_rule_ && projection_->Unproject(rule_start_, mouse_);
+          draw_rule_ = !draw_rule_ && projection_->Unproject(&rule_start_, mouse_);
           break;
 
         case SDL_BUTTON_LEFT:
@@ -751,7 +758,7 @@ public:
             if (Unproject(current, mouse_, rot_start_)) {
               // Compose final rotation.
               auto rotation = Quaternion(mouse_start_, current)*rot_start_;
-              projection_->SetRotation(rotation);
+              projection_->set_rotation(rotation);
               inset_.SetRotation(rotation);
               dirty_.SetAll(true);
             }
@@ -782,7 +789,7 @@ public:
           S2Point current;
           if (Unproject(current, mouse_, rot_start_)) {
             auto rotation = Quaternion(mouse_start_, current)*rot_start_;
-            projection_->SetRotation(rotation);
+            projection_->set_rotation(rotation);
             inset_.SetRotation(rotation);
             dirty_.SetAll(true);
           }
@@ -908,7 +915,7 @@ private:
     }
   }
 
-  std::unique_ptr<Projection> projection_;
+  std::unique_ptr<IProjection> projection_;
   const S2ShapeIndex* index_;
   util::bitmap::Bitmap64 dirty_;
 
@@ -934,6 +941,9 @@ private:
   Affine3 project_fwd_ = Affine3::Eye();
   Affine3 project_inv_ = Affine3::Eye();
   Affine3 invrot_;
+
+  // Scratch space for projected geometry.
+  R2Shape outline_;
 };
 
 // Land geometry.
