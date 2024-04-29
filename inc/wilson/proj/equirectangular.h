@@ -81,6 +81,13 @@ struct Equirectangular final : Projection<Equirectangular> {
     return *out;
   }
 
+  // Clips a single S2Point to the visible portion of the sphere.
+  // Returns true if the point is visible and false otherwise.
+  bool Clip(S2Point point) const override {
+    // All points are visible in an equirectangular projection.
+    return true;
+  }
+
   EdgeList& Clip(absl::Nonnull<EdgeList*> edges, const S2Shape::Edge& edge) const override {
     // edge crosses it and split the edge if so.
     edges->clear();

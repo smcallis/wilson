@@ -301,9 +301,9 @@ public:
 
   // Projects a point from world space to screen space.
   //
-  // Does not distinguish between visible and non-visible points.  Edges should
-  // be Clip()-ed to the projection boundary to ensure only visible points are
-  // projected.
+  // Does not distinguish between visible and non-visible points.  Geometry
+  // should be Clip()-ed to the projection boundary to ensure only visible
+  // points are projected.
   virtual R2Point Project(S2Point) const = 0;
 
 
@@ -348,6 +348,11 @@ public:
   // Otherwise, returns false.
   virtual bool Unproject(absl::Nonnull<S2Point *> out,  //
     R2Point point, bool nearest) const = 0;
+
+
+  // Clips a single S2Point to the visible portion of the sphere.  Returns true
+  // if the point is visible and false otherwise.
+  virtual bool Clip(S2Point) const = 0;
 
 
   // Clips an S2Shape edge to the visible portion of the sphere.  If need be,

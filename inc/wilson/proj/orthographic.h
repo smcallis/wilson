@@ -80,10 +80,18 @@ struct Orthographic final : Projection<Orthographic> {
     return *out;
   }
 
+  // Clips a single S2Point to the visible portion of the sphere.
+  // Returns true if the point is visible and false otherwise.
+  bool Clip(S2Point point) const override {
+    // Orthographic projections can see half the sphere.  So check that we're on
+    // the positive side relative to the nadir.
+    return nadir_plane_.Sign(point) > 0;
+  }
+
   EdgeList& Clip(absl::Nonnull<EdgeList*> edges, const S2Shape::Edge& edge) const override {
     edges->clear();
     S2Shape::Edge copy = edge;
-    if (Plane(nadir()).ClipEdgeOnSphere(copy)) {
+    if (nadir_plane_.ClipEdgeOnSphere(copy)) {
       edges->emplace_back(copy);
     }
     return *edges;
@@ -143,6 +151,8 @@ protected:
     unit_to_world_ =
       Affine3::Scale({1/scale(), 1/scale(), -1/scale()})
       *Affine3::Permute(-1);
+
+    nadir_plane_ = Plane(nadir());
   }
 
 private:
@@ -210,6 +220,7 @@ private:
 
   // Forward and reverse transformation matrices.
   Affine3 world_to_unit_, unit_to_world_;
+  Plane nadir_plane_;
 };
 
 void Orthographic::GenerateParallels(absl::Nonnull<R2Shape*> out) const {

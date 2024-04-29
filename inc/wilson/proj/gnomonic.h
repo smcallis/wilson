@@ -108,6 +108,12 @@ struct Gnomonic final : Projection<Gnomonic> {
     return *out;
   }
 
+  // Clips a single S2Point to the visible portion of the sphere.
+  // Returns true if the point is visible and false otherwise.
+  bool Clip(S2Point point) const override {
+    return clip_plane_.Sign(point) > 0;
+  }
+
   EdgeList& Clip(absl::Nonnull<EdgeList*> edges, const S2Shape::Edge& edge) const override {
     // The visible area of a gnomonic projection is < half a hemisphere, so its
     // not possible for an edge to leave one side and re-enter on the other.

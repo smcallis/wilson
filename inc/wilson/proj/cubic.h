@@ -68,6 +68,18 @@ struct Cubic final : Projection<Cubic> {
     return *out;
   }
 
+  // Clips a single S2Point to the visible portion of the sphere.  Returns true
+  // if the point is visible and false otherwise.
+  bool Clip(S2Point point) const override {
+    const int face = S2::GetFace(point);
+    for (const auto& visible : visible_faces_) {
+      if (visible.id == face) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   // Clips an edge to the visible portion of the sphere, possibly splitting it
   // into multiple discontinuous pieces if needed.  For a cubic projection this
   // is equivalent to clipping edges to the (at most) 3 visible faces.
