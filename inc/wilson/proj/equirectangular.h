@@ -82,7 +82,6 @@ struct Equirectangular final : Projection<Equirectangular> {
   }
 
   EdgeList& Clip(absl::Nonnull<EdgeList*> edges, const S2Shape::Edge& edge) const override {
-    // Equirectangular projection has a cut at the anti-meridian.  Test if the
     // edge crosses it and split the edge if so.
     edges->clear();
 
@@ -160,10 +159,10 @@ struct Equirectangular final : Projection<Equirectangular> {
     return *edges;
   }
 
-  R2Shape& Stitch(absl::Nonnull<R2Shape*> out, const S2Point& v1, const S2Point& v0) const override {
+  R2Shape& Stitch(absl::Nonnull<R2Shape*> out, const S2Shape::Edge& edge, const S2Point& v0) const override {
     // The edges of the projection are always straight vertical or horizontal
     // lines so we can just use a line to stitch points together.
-    out->Append(Project(v1));
+    out->Append(Project(edge.v1));
     out->Append(Project(v0));
     return *out;
   }
@@ -220,7 +219,7 @@ R2Shape& Equirectangular::Project(absl::Nonnull<R2Shape *> out,  //
   const auto StitchEdges = [&](int idx_b, int idx_a) {
     const S2Shape::Edge& edge_a = chain_edges[idx_a];
     const S2Shape::Edge& edge_b = chain_edges[idx_b];
-    Stitch(out, edge_b.v1, edge_a.v0);
+    Stitch(out, edge_b, edge_a.v0);
   };
 
   // Test whether two points are on opposite sides of the anti-meridian cut.

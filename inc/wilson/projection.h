@@ -359,8 +359,8 @@ public:
     const S2Shape::Edge& edge) const = 0;
 
 
-  // Takes two vertices that are presumed to have been clipped via Clip(),
-  // converts them into screen space and connects v1 to v0 with a series of
+  // Takes an edge and vertex that are presumed to have been clipped via Clip(),
+  // converts them into screen space and connects edge.v1 to v0 with a series of
   // lines along the projection boundary.
   //
   // v0 isn't added to the path so that this function may be used to stitch
@@ -370,7 +370,7 @@ public:
   //
   // Returns a reference to the passed R2Shape.
   virtual R2Shape& Stitch(absl::Nonnull<R2Shape *> out,  //
-    const S2Point& v1, const S2Point& v0) const = 0;
+    const S2Shape::Edge& edge, const S2Point& v0) const = 0;
 
 
   // Takes an S2Shape::Edge, and subdivides it as needed to achieve a maximum
@@ -661,39 +661,47 @@ bool Projection<Derived>::Unproject(absl::Nonnull<S2Point*> out, R2Point pnt, bo
 
 template <typename Derived>
 R2Shape& Projection<Derived>::Project(absl::Nonnull<R2Shape*> out, const S2Shape& shape, double max_sq_error) const {
-  for (int chain=0; chain < shape.num_chains(); ++chain) {
-    S2Point head, tail;
-    bool found_point = false;
+  for (int chain_id=0; chain_id < shape.num_chains(); ++chain_id) {
+    S2Shape::Chain chain = shape.chain(chain_id);
+
+    // The head of the chain and the last edge processed.
+    std::optional<S2Shape::Edge> head;
+    std::optional<S2Shape::Edge> last;
 
     IProjection::EdgeList edges;
-    for (int i=0; i < shape.chain(chain).length; ++i) {
-      Clip(&edges, shape.chain_edge(chain, i));
-      for (const S2Shape::Edge& edge : edges) {
-        if (!found_point) {
-          found_point = true;
-          head = edge.v0;
-          tail = edge.v0;
+    for (int i=0; i < chain.length; ++i) {
+      Clip(&edges, shape.chain_edge(chain_id, i));
+      for (const S2Shape::Edge &edge : edges) {
+        if (!head) {
+          head = edge;
         }
 
-        // We went out of the clip region and came back in, stitch a path along
-        // the boundary between the vertices to close it back up.
-        if (tail != edge.v0) {
-          Stitch(out, tail, edge.v0);
+        // Edges should be connected if they don't cross the projection
+        // boundary.  So we should have a chain of edges something like [(v0,
+        // v1), (v1, v2), (v2, v3)] where vertices are shared with the previous
+        // and next edges.
+        //
+        // If the tail of the current chain doesn't match the start of this
+        // edge, then we must have left the projection and come back in.
+        //
+        // Stitch around the boundary between the vertices to close it.
+        if (last && last->v1 != edge.v0) {
+          Stitch(out, *last, edge.v0);
         }
 
         Subdivide(out, edge, false, max_sq_error);
-        tail = edge.v1;
+        last = edge;
       }
     }
 
-    if (found_point) {
-      out->Append(Project(tail));
-
+    if (head) {
       // If we didn't land back on the first vertex after going around the
       // chain, it's because we went over the clip edge, stitch a path between
       // them to close the polygon.
-      if (tail != head) {
-        Stitch(out, tail, head);
+      if (last->v1 != head->v0) {
+        Stitch(out, *last, head->v0);
+      } else {
+        out->Append(Project(last->v1));
       }
     }
 

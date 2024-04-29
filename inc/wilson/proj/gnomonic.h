@@ -121,7 +121,7 @@ struct Gnomonic final : Projection<Gnomonic> {
     return *edges;
   };
 
-  R2Shape& Stitch(absl::Nonnull<R2Shape *> out, const S2Point& v1, const S2Point& v0) const override {
+  R2Shape& Stitch(absl::Nonnull<R2Shape *> out, const S2Shape::Edge& edge, const S2Point& v0) const override {
     // The visible region is always < a hemisphere in gnomonic projection.  The
     // visible circle is a unit circle so we can stitch two vertices with edges
     // along that circle.
@@ -131,7 +131,7 @@ struct Gnomonic final : Projection<Gnomonic> {
     constexpr double kOverdraw = 0.10;
 
     R2Point cc = Project(nadir()); // Center of the circle.
-    R2Point p0 = Project(v1)-cc;
+    R2Point p0 = Project(edge.v1)-cc;
     R2Point p1 = Project(v0)-cc;
 
     // P0 and P1 are on the circle so the radius is just their magnitude.

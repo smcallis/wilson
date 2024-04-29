@@ -172,7 +172,7 @@ struct Cubic final : Projection<Cubic> {
   // them together, adding segments along the projection boundary as needed.
   // This is used when a chain exits the projection and renters at a later
   // point, we need to put edges along the boundary to close it.
-  R2Shape& Stitch(absl::Nonnull<R2Shape*> out, const S2Point& v1, const S2Point& v0) const override {
+  R2Shape& Stitch(absl::Nonnull<R2Shape*> out, const S2Shape::Edge& edge, const S2Point& v0) const override {
     // How many times A must be incremented to reach B, assuming that we take
     // the value modulo N.
     const auto ModuloDistance = [](int a, int b, int n) {
@@ -183,7 +183,7 @@ struct Cubic final : Projection<Cubic> {
       }
     };
 
-    const R2Point p1 = Project(v1);
+    const R2Point p1 = Project(edge.v1);
     const R2Point p0 = Project(v0);
 
     // The vertices must be on the edge of a face since they were clipped. We
