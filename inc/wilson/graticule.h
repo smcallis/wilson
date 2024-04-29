@@ -44,7 +44,7 @@ inline void S2Graticule(absl::Nonnull<R2Shape *> out, const IProjection &proj,
     if (!clip_cap || clip.ClipEdgeOnSphere(edge)) {
       proj.Clip(&edges, edge);
       for (const S2Shape::Edge& edge : edges) {
-        proj.Subdivide(out, edge, 0.25, true);
+        proj.Subdivide(out, edge, 0.125a, true);
         out->EndChain();
       }
     }
