@@ -178,11 +178,11 @@ private:
 
     IProjection::EdgeList edges;
     for (const auto& edge : Clip(&edges, {v0, v1})) {
-      Subdivide(out, edge, 0.25, true);
+      Subdivide(out, edge, true, 0.25);
     }
 
     for (const auto& edge : Clip(&edges, {v1, v2})) {
-      Subdivide(out, edge, 0.25, true);
+      Subdivide(out, edge, true, 0.25);
     }
   }
 
