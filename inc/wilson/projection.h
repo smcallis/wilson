@@ -143,7 +143,7 @@ namespace w {
 class IProjection {
 public:
   // The default distance-squared error (in pixels) when subdividing.
-  static constexpr double kDefaultProjectionError = 1;
+  static constexpr double kDefaultProjectionErrorSq = 0.25*0.25;
 
   // A simple struct to store scale and rotation values for the projection.
   struct Transform {
@@ -406,11 +406,11 @@ public:
   }
 
   R2Shape& Project(absl::Nonnull<R2Shape *> out, const S2Shape &shape) const {
-    return Project(out, shape, kDefaultProjectionError);
+    return Project(out, shape, kDefaultProjectionErrorSq);
   }
 
   R2Shape& Project(absl::Nonnull<R2Shape *> out, const S2Cap &cap) const {
-    return Project(out, cap, kDefaultProjectionError);
+    return Project(out, cap, kDefaultProjectionErrorSq);
   }
 
   bool Unproject(absl::Nonnull<S2Point *> out, R2Point point) const {
@@ -419,7 +419,7 @@ public:
 
   R2Shape& Subdivide(absl::Nonnull<R2Shape *> out,  //
     const S2Shape::Edge& edge, bool add_last = false) const {
-    return Subdivide(out, edge, add_last, kDefaultProjectionError);
+    return Subdivide(out, edge, add_last, kDefaultProjectionErrorSq);
   }
 
 protected:
