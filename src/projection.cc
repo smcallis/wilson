@@ -80,7 +80,7 @@ public:
     for (int ii=0; ii < 4; ++ii) {
       const S2Shape::Edge edge = {cell.GetVertex(ii), cell.GetVertex(ii+1)};
       for (const S2Shape::Edge& edge : projection_->Clip(&edges, edge)) {
-        r2shape.clear();
+        r2shape.Clear();
         projection_->Subdivide(&r2shape, edge, true, kPixelTolerance);
 
         for (int jj=0; jj < r2shape.nchains(); ++jj) {

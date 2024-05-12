@@ -59,7 +59,7 @@ struct Orthographic final : Projection<Orthographic> {
   // Populates a path representing the outline of the sphere on screen.  May
   // encompass the entire screen.
   R2Shape& MakeOutline(absl::Nonnull<R2Shape*> out) const override {
-    out->clear();
+    out->Clear();
 
     // Find basis vectors for nadir plane that correspond to the axes of
     // the ellipse of the Earth in the projection.
@@ -75,7 +75,7 @@ struct Orthographic final : Projection<Orthographic> {
 
   // Populates a path with a graticule with lines of latitude and longitude.
   R2Shape& MakeGraticule(absl::Nonnull<R2Shape*> out) const override {
-    out->clear();
+    out->Clear();
     GenerateGraticule(out);
     return *out;
   }

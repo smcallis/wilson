@@ -91,7 +91,7 @@ inline void S2Graticule(absl::Nonnull<R2Shape *> out, const IProjection &proj,
     AppendEdgeToShape({vertices[1], vertices[3]});
   };
 
-  out->clear();
+  out->Clear();
   if (level <= 0) {
     // Add bottom/left edges of faces 0 and 1
     for (int face=0; face <= 1; ++face) {

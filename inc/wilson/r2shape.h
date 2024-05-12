@@ -32,12 +32,13 @@
 #include "blend2d.h"
 #include "absl/types/span.h"
 #include "absl/algorithm/container.h"
-
 #include "s2/r2.h"
+
+#include "wilson/chain_sink.h"
 
 namespace w {
 
-struct R2Shape {
+struct R2Shape : public ChainSink {
   struct Edge {
     Edge() = default;
     Edge(const R2Point& v0, const R2Point& v1)
@@ -64,10 +65,21 @@ struct R2Shape {
     int length;
   };
 
-  // Appends a point to the path.  If a new chain is created, results in a move
-  // of the cursor, otherwise a line is drawn from the previous position to the
-  // new position.
-  void Append(R2Point pnt) {
+  // Clears the buffer to its initial state, as though nothing has been added.
+  void Clear() override {
+    path_.clear();
+    chains_.clear();
+    active_chain_ = -1;
+  }
+
+  // Starts a new chain.  If the current chain is empty, does nothing.
+  void Break() override {
+    active_chain_ = chains_.size();
+    chains_.emplace_back(path_.size());
+  }
+
+  // Appends a single point to the current chain.
+  void Append(const R2Point& pnt) override {
     if (MaybeStartChain()) {
       path_.moveTo(BL(pnt));
     } else {
@@ -75,13 +87,22 @@ struct R2Shape {
     }
   }
 
-  // Same as Append() above but takes a span of points.
-  void Append(absl::Span<const R2Point> points) {
+  // Appends a span of points to the current chain.
+  void Append(absl::Span<const R2Point> points) override {
     for (const auto& pnt : points) {
       Append(pnt);
     }
   }
 
+  // Returns the size of the current chain.
+  ssize_t ChainSize() const override {
+    if (chains_.empty()) {
+      return 0;
+    }
+    return path_.size() - chains_.back();
+  }
+
+  // Appends all the chains of a shape.
   void Append(const R2Shape& shape) {
     EndChain();
     for (int i=0; i < shape.nchains(); ++i) {
@@ -91,12 +112,17 @@ struct R2Shape {
   }
 
   // Similar to Append, but always adds the span of points as a separate chain.
-  void AddChain(absl::Span<const R2Point> points) {
+  void AddChain(absl::Span<const R2Point> points, bool close) {
     EndChain();
     for (const auto& pnt : points) {
       Append(pnt);
     }
-    EndChain();
+
+    if (close) {
+      CloseChain();
+    } else {
+      EndChain();
+    }
   }
 
   // Adds a new chain that's a closed circle.  The circle is segmented into
@@ -141,6 +167,7 @@ struct R2Shape {
   // Closes and ends the current chain.  The next command will start a new one.
   void CloseChain() {
     if (active_chain_ >= 0) {
+      path_.lineTo(path_.vertexData()[chains_.back()]);
       path_.close();
       active_chain_ = -1;
     }
@@ -202,13 +229,6 @@ struct R2Shape {
     return {data()+c.offset, static_cast<size_t>(c.length)};
   }
 
-  // Removes any segments from the path and resets it to empty.
-  void clear() {
-    path_.clear();
-    chains_.clear();
-    active_chain_ = -1;
-  }
-
 private:
   // Converts an R2Point into a BLPoint.
   BLPoint BL(const R2Point& pnt) {
@@ -219,8 +239,7 @@ private:
   // then degrades into a noop.
   bool MaybeStartChain() {
     if (active_chain_ < 0) {
-      active_chain_ = chains_.size();
-      chains_.emplace_back(path_.size());
+      Break();
       return true;
     }
     return false;

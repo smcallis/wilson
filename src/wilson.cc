@@ -313,8 +313,8 @@ public:
               if (dirty_.Get(shape_id)) {
                 dirty_.Set(shape_id, false);
 
-                pair.r2shape.clear();
-                projection_->Project(&pair.r2shape, *pair.s2shape);
+                pair.r2shape.Clear();
+                projection_->Project(&pair.r2shape, stitch_buffer_, *pair.s2shape);
 
                 R2Shape simplified;
                 Simplify(&simplified, pair.r2shape);
@@ -514,7 +514,7 @@ public:
       ctx.strokePath(shape.path());
 
       // And draw the backward half dashed.
-      shape.clear();
+      shape.Clear();
       AddGreatCircle(normal, true);
 
       if (!shape.empty()) {

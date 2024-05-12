@@ -65,7 +65,7 @@ struct Equirectangular final : Projection<Equirectangular> {
   // Populates a path representing the outline of the sphere on screen.  May
   // encompass the entire screen.
   R2Shape& MakeOutline(absl::Nonnull<R2Shape*> out) const override {
-    out->clear();
+    out->Clear();
     out->Append(R2Point(outline_.lo().x(), outline_.lo().y()));
     out->Append(R2Point(outline_.hi().x(), outline_.lo().y()));
     out->Append(R2Point(outline_.hi().x(), outline_.hi().y()));
@@ -76,7 +76,7 @@ struct Equirectangular final : Projection<Equirectangular> {
 
   // Populates a path with a graticule with lines of latitude and longitude.
   R2Shape& MakeGraticule(absl::Nonnull<R2Shape*> out) const override {
-    out->clear();
+    out->Clear();
     // generate_graticule(path);
     return *out;
   }

@@ -35,7 +35,7 @@ namespace w {
 // Any existing path information is erased.
 static inline void Simplify(absl::Nonnull<R2Shape *> out,
     const R2Shape& shape, double max_sq_error=1) {
-    out->clear();
+    out->Clear();
     for (int chain=0; chain < shape.nchains(); ++chain) {
         absl::Span<const R2Point> points = shape.chain_vertices(chain);
         if (points.empty()) {
