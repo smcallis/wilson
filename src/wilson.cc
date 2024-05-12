@@ -416,7 +416,7 @@ public:
             //   clip.v0.x(), clip.v0.y(), clip.v0.z(),
             //   clip.v1.x(), clip.v1.y(), clip.v1.z());
 
-            projection_->Subdivide(&shape, clip, 0.25, true);
+            projection_->Subdivide(&shape, clip, 0.25);
             shape.EndChain();
             //clipped.emplace_back(clip);
           }
@@ -591,7 +591,7 @@ public:
         R2Shape shape;
         IProjection::EdgeList edges;
         for (const auto& edge : projection_->Clip(&edges, {rule_start_, pnt})) {
-          projection_->Subdivide(&shape, edge, 0.25, true);
+          projection_->Subdivide(&shape, edge, 0.25);
           shape.EndChain();
         }
 

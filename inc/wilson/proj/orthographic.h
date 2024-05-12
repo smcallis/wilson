@@ -97,11 +97,11 @@ struct Orthographic final : Projection<Orthographic> {
     return *edges;
   }
 
-  R2Shape& Stitch(absl::Nonnull<R2Shape*> out, const S2Shape::Edge& edge, const S2Point& v0) const override {
+  void Stitch(absl::Nonnull<R2Shape*> out, const S2Shape::Edge& edge, const S2Point& v0) const override {
     // Orthographic projection is always a circle on the screen and the clip
     // bisects the sphere (making it a great circle).  So we can just subdivide
     // an edge normally to connect them.
-    return Subdivide(out, {edge.v1, v0});
+    Subdivide(out, {edge.v1, v0});
   }
 
   R2Point WorldToUnit(S2Point p) const override {
@@ -188,11 +188,11 @@ private:
 
     IProjection::EdgeList edges;
     for (const auto& edge : Clip(&edges, {v0, v1})) {
-      Subdivide(out, edge, true, 0.25);
+      Subdivide(out, edge, 0.25);
     }
 
     for (const auto& edge : Clip(&edges, {v1, v2})) {
-      Subdivide(out, edge, true, 0.25);
+      Subdivide(out, edge, 0.25);
     }
   }
 

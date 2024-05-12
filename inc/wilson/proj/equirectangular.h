@@ -166,12 +166,11 @@ struct Equirectangular final : Projection<Equirectangular> {
     return *edges;
   }
 
-  R2Shape& Stitch(absl::Nonnull<R2Shape*> out, const S2Shape::Edge& edge, const S2Point& v0) const override {
+  void Stitch(absl::Nonnull<R2Shape*> out, const S2Shape::Edge& edge, const S2Point& v0) const override {
     // The edges of the projection are always straight vertical or horizontal
     // lines so we can just use a line to stitch points together.
     out->Append(Project(edge.v1));
     out->Append(Project(v0));
-    return *out;
   }
 
   R2Point WorldToUnit(S2Point p) const override {
