@@ -88,82 +88,9 @@ struct Equirectangular final : Projection<Equirectangular> {
     return true;
   }
 
-  EdgeList& Clip(absl::Nonnull<EdgeList*> edges, const S2Shape::Edge& edge) const override {
-    // edge crosses it and split the edge if so.
-    edges->clear();
-
-    // Returns -1, 0, or +1 depending on the value of x.
-    const auto Sign = [](double x) {
-      return x < 0 ? -1 : ((x > 0) ? +1 : 0);
-    };
-
-    // Normal to the plane containing the antimeridian and a plane perpendicular
-    // to it where the antimeridian cut is on the positive side.
-    const S2Point amnorm = Unrotate({0, 1, 0});
-    const S2Point amperp = Unrotate({-1, 0, 0});
-
-    int sign0 = Sign(edge.v0.DotProd(amnorm));
-    int sign1 = Sign(edge.v1.DotProd(amnorm));
-
-    // If both vertices were on one side, then there's nothing to do.
-    if ((sign0 < 0 && sign1 < 0) || (sign0 > 0 && sign1 > 0)) {
-      edges->emplace_back(edge);
-      return *edges;
-    }
-
-    // Find the intersection point, flip it to the correct half of the sphere
-    // based on the orientation of the vertices across the anti-meridian.
-    S2Point isect = edge.v0.CrossProd(edge.v1).CrossProd(amnorm);
-    if (sign1-sign0 > 0) {
-      isect = -isect;
-    }
-
-    // The edge crossed the anti-meridian plane, but it did so in the opposite
-    // hemisphere, so the edge wasn't cut.
-    if (isect.DotProd(amperp) <= 0) {
-      edges->emplace_back(edge);
-      return *edges;
-    }
-
-    // The edges weren't both on one side and the intersection point was in the
-    // correct half of the sphere for the edge to have crossed the meridian.
-    //
-    // Altogether, there are nine possible combinations of -1, 0, +1 sign for
-    // the two dot products, and we've handled two, (-,- and +,+), so we need to
-    // handle the remaining seven cases.
-    //
-    // If the signs are actually opposite (-,+ or +,-), then we can just split
-    // the edge and perturb the vertices to the right side to avoid accidental
-    // meridian wrapping due to numerical error.
-    if (sign0 == -sign1) {
-      edges->emplace_back(edge.v0, S2::Interpolate(edge.v0, isect, 1-1e-6));
-      edges->emplace_back(S2::Interpolate(isect, edge.v1, 1e-6), edge.v1);
-      return *edges;
-    }
-
-    // Otherwise one or the other sign was zero.  When this happens we need to
-    // be careful because we'll see _two_ edges incident on a given vertex
-    // exactly on the meridian.  We want to cut one of these edges but not both.
-    //
-    // For the purposes of computing longitude, a point exactly on the meridian
-    // is at -180 degrees, so we want to split the edge when that sign would
-    // change.  So if the other vertex is on the positive side of the cut, then
-    // we'll split the edge.
-    if (sign0 == 0 && sign1 == 0) {
-      return *edges;
-    }
-
-    if (sign0 == 0) {
-      edges->emplace_back(edge.v0, S2::Interpolate(edge.v0, edge.v1, 1e-6));
-      return *edges;
-    }
-
-    if (sign1 == 0) {
-      edges->emplace_back(edge.v0, S2::Interpolate(edge.v0, edge.v1, 1-1e-6));
-      return *edges;
-    }
-
-    return *edges;
+  EdgeList& Clip(  //
+    absl::Nonnull<EdgeList*> edges, const S2Shape::Edge& edge) const override {
+    return ClipInternal(edges, edge);
   }
 
   void Stitch(absl::Nonnull<R2Shape*> out, const S2Shape::Edge& edge, const S2Point& v0) const override {
@@ -200,112 +127,250 @@ struct Equirectangular final : Projection<Equirectangular> {
     return true;
   }
 
-  R2Shape& Project(absl::Nonnull<R2Shape *> out,  //
-    const S2Shape& shape, double max_sq_error) const override;
+  R2Shape& Project(absl::Nonnull<R2Shape *> out, absl::Nonnull<ChainStitcher*>, const S2Shape&, double max_sq_error) const override;
 
 private:
   region2 outline_;
+
+  // A crossing where an edge crossed the antimeridian.
+  struct Crossing {
+    Crossing() = default;
+
+    static Crossing Incoming(int vertex, uint8_t boundary) {
+      Crossing crossing;
+      crossing.vertex = vertex;
+      crossing.boundary = boundary;
+      crossing.incoming = true;
+      return crossing;
+    }
+
+    static Crossing Outgoing(int vertex, uint8_t boundary) {
+      Crossing crossing = Incoming(vertex, boundary);
+      crossing.incoming = false;
+      return crossing;
+    }
+
+    int vertex;
+    uint8_t boundary;  // In the range [0,1] for left and right.
+    bool incoming;
+  };
+
+  using CrossingVector = absl::InlinedVector<Crossing, 16>;
+
+  // Clipping logic.  If crossings is given, it is populated as well.
+  EdgeList& ClipInternal(absl::Nonnull<EdgeList*> edges,
+    const S2Shape::Edge& edge, CrossingVector* crossings = nullptr) const {
+    edges->clear();
+
+    // Returns -1, 0, or +1 depending on the value of x.
+    const auto Sign = [](double x) {
+      return x < 0 ? -1 : ((x > 0) ? +1 : 0);
+    };
+
+    // Normal to the plane containing the antimeridian and a plane perpendicular
+    // to it where the antimeridian cut is on the positive side.
+    const S2Point amnorm = Unrotate({0, 1, 0});
+    const S2Point amperp = Unrotate({-1, 0, 0});
+
+    int sign0 = Sign(edge.v0.DotProd(amnorm));
+    int sign1 = Sign(edge.v1.DotProd(amnorm));
+
+    // If both vertices were on one side, then there's nothing to do.
+    if ((sign0 < 0 && sign1 < 0) || (sign0 > 0 && sign1 > 0)) {
+      edges->emplace_back(edge);
+      return *edges;
+    }
+
+    // Find the intersection point, flip it to the correct half of the sphere
+    // based on the orientation of the vertices across the anti-meridian.
+    S2Point isect = edge.v0.CrossProd(edge.v1).CrossProd(amnorm).Normalize();
+    if (sign1-sign0 > 0) {
+      isect = -isect;
+    }
+
+    // The edge crossed the anti-meridian plane, but it did so in the opposite
+    // hemisphere, so the edge wasn't cut.
+    if (isect.DotProd(amperp) <= 0) {
+      edges->emplace_back(edge);
+      return *edges;
+    }
+
+    // Both signs are zero, edge is on the antimeridian, ignore it.
+    if (sign0 == 0 && sign1 == 0) {
+      return *edges;
+    }
+
+    // The edges weren't both on one side and the intersection point was in the
+    // correct half of the sphere for the edge to have crossed the meridian.
+    //
+    // Altogether, there are nine possible combinations of -1, 0, +1 sign for
+    // the two dot products, and we've handled two, (-,- and +,+), so we need to
+    // handle the remaining seven cases.
+    //
+    // If the signs are actually opposite (-,+ or +,-), then we can just split
+    // the edge and perturb the vertices to the right side to avoid accidental
+    // meridian wrapping due to numerical error.
+    if (sign0 == -sign1) {
+      const S2Shape::Edge edge0(
+        edge.v0, S2::Interpolate(edge.v0, isect, 1 - 1e-6));
+
+      const S2Shape::Edge edge1(
+        S2::Interpolate(isect, edge.v1, 1e-6), edge.v1);
+
+      edges->emplace_back(edge0);
+      edges->emplace_back(edge1);
+
+      if (crossings) {
+        crossings->push_back(Crossing::Outgoing(-1, sign0 < 0 ? 1 : 0));
+        crossings->push_back(Crossing::Incoming(-1, sign1 < 0 ? 1 : 0));
+      }
+
+      return *edges;
+    }
+
+    // One or the other sign was zero.  Bump the zero vertex off of the
+    // antimeridian towards the other vertex.
+    if (sign0 == 0) {
+      edges->emplace_back(S2::Interpolate(edge.v0, edge.v1, 1e-6), edge.v1);
+      return *edges;
+    }
+
+    if (sign1 == 0) {
+      edges->emplace_back(edge.v0, S2::Interpolate(edge.v0, edge.v1, 1-1e-6));
+      return *edges;
+    }
+
+    return *edges;
+  }
 };
 
 
-R2Shape& Equirectangular::Project(absl::Nonnull<R2Shape *> out,  //
-  const S2Shape& shape, double max_sq_error) const {
-  std::vector<S2Shape::Edge> chain_edges;
-  std::vector<int> cuts;
-
-  // Subdivide a range of edges from chain_edges into the shape.
-  const auto SubdivideRange= [&](int beg, int end) {
-    for (int i=beg; i < end; ++i) {
-      Subdivide(out, chain_edges[i], false, max_sq_error);
-    }
-  };
-
-  // Stitch end points of two edges together.  Stitches vertex 1 of edge b to
-  // vertex 0 of edge a.
-  const auto StitchEdges = [&](int idx_b, int idx_a) {
-    const S2Shape::Edge& edge_a = chain_edges[idx_a];
-    const S2Shape::Edge& edge_b = chain_edges[idx_b];
-    Stitch(out, edge_b, edge_a.v0);
-  };
-
-  // Test whether two points are on opposite sides of the anti-meridian cut.
-  const S2Point amnorm = Unrotate({0, 1, 0});
+inline R2Shape& Equirectangular::Project(absl::Nonnull<R2Shape *> out,
+  absl::Nonnull<ChainStitcher*> stitcher, const S2Shape& shape, double max_sq_error) const {
 
   EdgeList edges;
-  for (int chain=0; chain < shape.num_chains(); ++chain) {
-    // Reserve additional space if needed and clear the lists.
+  CrossingVector crossings;
+
+  stitcher->Clear();
+
+  // Subdivide edges and split chains as needed.
+  for (int chain = 0; chain < shape.num_chains(); ++chain) {
+    stitcher->Break();
+
+    int start = stitcher->size();
     int nedge = shape.chain(chain).length;
-    chain_edges.reserve(nedge);
+    for (int i = 0; i < nedge; ++i) {
+      ClipInternal(&edges, shape.chain_edge(chain, i), &crossings);
 
-    cuts.clear();
-    chain_edges.clear();
+      if (edges.size() == 2) {
+        // The edge was subdivided so two crossings were appended.  Fix up their
+        // actual vertex indices after we subdivide the edges.
+        Subdivide(stitcher, edges[0], max_sq_error);
+        int index = stitcher->size() - 1;
+        stitcher->Break();
+        Subdivide(stitcher, edges[1], max_sq_error);
 
-    // Gather all the clipped chain edges together, noting cut locations.
-    for (int i=0; i < nedge; ++i) {
-      Clip(&edges, shape.chain_edge(chain, i));
-      for (int j=0; j < edges.size(); ++j) {
-        if (j > 0) {
-          cuts.emplace_back(chain_edges.size());
+        crossings[crossings.size()-2].vertex = index;
+        crossings[crossings.size()-1].vertex = index + 1;
+      } else {
+        for (const S2Shape::Edge& edge : edges) {
+          Subdivide(stitcher, edge, max_sq_error);
         }
-        chain_edges.emplace_back(edges[j]);
       }
     }
 
-    // Now stitch the cuts back together into new chains.  If there were no
-    // cuts, then we can just form a single contiguous chain.
-    if (cuts.empty()) {
-      SubdivideRange(0, chain_edges.size());
-      out->EndChain();
+    // Ensure that polygon chains are closed properly if need be.
+    if (shape.dimension() == 2) {
+      if (stitcher->size() > start && (*stitcher)[start] == stitcher->back()) {
+        stitcher->pop_back();
+        stitcher->Connect(stitcher->size()-1, start);
+      }
+    }
+  }
+
+  // Sort crossings CCW around the projection boundary.
+  absl::c_sort(crossings, [&](const Crossing& a, const Crossing& b) {
+    if (a.boundary < b.boundary) return true;
+    if (a.boundary > b.boundary) return false;
+
+    if (a.boundary == 0) {
+      return (*stitcher)[a.vertex].y() > (*stitcher)[b.vertex].y();
+    } else {
+      return (*stitcher)[a.vertex].y() < (*stitcher)[b.vertex].y();
+    }
+  });
+
+  // Now stitch crossings together.
+  const int ncrossings = crossings.size();
+  for (int ii = 0; ii < ncrossings; ++ii) {
+    DCHECK_NE(crossings[ii].vertex, -1);
+
+    // Skip to an outgoing crossing.
+    const Crossing& outgoing = crossings[ii];
+    if (outgoing.incoming) {
       continue;
     }
 
-    // Start by subdividing and closing the first cut range.
-    int beg = cuts.back();
-    int end = cuts[0];
-    for (int i=0; i < cuts.size(); ++i, beg = end) {
-      end = cuts[i];
-      if (i == 0) {
-        SubdivideRange(beg, chain_edges.size());
-        SubdivideRange(0, end);
-      } else {
-        SubdivideRange(beg, end);
+    // Find the next incoming crossing.
+    int jj = (ii + 1) % ncrossings;
+    for (; jj != ii; jj = (jj + 1) % ncrossings) {
+      if (crossings[jj].incoming) {
+        break;
       }
+    }
+    DCHECK_NE(ii, jj);
+    if (ii == jj) {
+      LOG(ERROR) << "Error degenerate crossings";
+      exit(-1);
+    }
 
-      // If we had an odd number of cuts then part of this chain enclosed the
-      // pole.  This makes sense since the anti-meridian only cuts a hemisphere,
-      // so topologically, if the chain doesn't contain the pole, it has to
-      // cross it an even number of times to close.
-      if (cuts.size() % 2 == 1) {
-        // Check which side of the cut the end points are on.  If they're
-        // different sides this cut is the one wrapping the pole.
-        const S2Point& epnt = chain_edges[end-1].v1;
-        const S2Point& bpnt = chain_edges[beg].v0;
+    const Crossing& incoming = crossings[jj];
 
-        double dot0 = epnt.DotProd(amnorm);
-        double dot1 = bpnt.DotProd(amnorm);
-        if (dot0*dot1 < 0) {
-          if (dot1 < 0) {
-            // Wrapping the north pole, stitch around it.
-            out->Append(Project(epnt));
-            out->Append(R2Point(outline_.hi().x(), outline_.lo().y()));
-            out->Append(R2Point(outline_.lo().x(), outline_.lo().y()));
-            out->Append(Project(bpnt));
-          } else {
-            // Wrapping the south pole, stitch around it.
-            out->Append(Project(epnt));
-            out->Append(R2Point(outline_.lo().x(), outline_.hi().y()));
-            out->Append(R2Point(outline_.hi().x(), outline_.hi().y()));
-            out->Append(Project(bpnt));
+    // When stitching between the crossings, if the outgoing crossing is on one
+    // boundary and the incoming crossing is on the other, we have to stitch
+    // over one or both of the poles.
+    absl::InlinedVector<int, 4> corners;
+    if (outgoing.boundary == incoming.boundary) {
+      if (ii > jj) {
+        // Crossings on the same boundary but outgoing was after incoming so we
+        // have to walk all the way around the corners.
+        if (outgoing.boundary == 0) {
+          for (int corner : {1, 0, 2, 3}) {
+            corners.emplace_back(corner);
           }
-          out->EndChain();
-          continue;
+        } else {
+          for (int corner : {3, 2, 1, 0}) {
+            corners.emplace_back(corner);
+          }
         }
       }
-
-      // Otherwise it's a normal cut, just stitch it together and continue.
-      StitchEdges(end-1, beg);
-      out->EndChain();
+    } else {
+      // Crossings on different boundaries, stitch two corners.
+      if (outgoing.boundary == 0) {
+        corners.emplace_back(1);
+        corners.emplace_back(0);
+      } else {
+        corners.emplace_back(3);
+        corners.emplace_back(2);
+      }
     }
+
+    int last = outgoing.vertex;
+    for (int corner : corners) {
+      stitcher->Break();
+      stitcher->Append(outline_.GetVertex(corner));
+
+      last = stitcher->Connect(last, stitcher->size() - 1);
+    }
+    stitcher->Connect(last, incoming.vertex);
+  }
+
+  const auto AddChain = [&](absl::Span<const R2Point> vertices) {
+    out->AddChain(vertices, shape.dimension() == 2);
+  };
+
+  if (!stitcher->EmitChains(AddChain)) {
+    fprintf(stderr, "Detected infinite loop splicing chains\n");
   }
 
   return *out;

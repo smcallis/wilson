@@ -96,7 +96,7 @@ struct R2Shape : public ChainSink {
 
   // Returns the size of the current chain.
   ssize_t ChainSize() const override {
-    if (chains_.empty()) {
+    if (active_chain_ < 0 || chains_.empty()) {
       return 0;
     }
     return path_.size() - chains_.back();
@@ -121,6 +121,7 @@ struct R2Shape : public ChainSink {
     if (close) {
       CloseChain();
     } else {
+
       EndChain();
     }
   }

@@ -32,6 +32,7 @@
 
 #include "wilson/graphics/pixel.h"
 #include "wilson/chain_sink.h"
+#include "wilson/chain_stitcher.h"
 #include "wilson/quaternion.h"
 #include "wilson/r2shape.h"
 #include "wilson/region.h"
@@ -322,7 +323,7 @@ public:
   //
   // Returns a reference to the passed R2Shape.
   virtual R2Shape& Project(absl::Nonnull<R2Shape *> out,  //
-    const S2Shape& shape, double max_sq_error) const = 0;
+    absl::Nonnull<ChainStitcher*>, const S2Shape& shape, double max_sq_error) const = 0;
 
 
   // Projects an S2Cap into screen space, returning a polygon with its edges
@@ -331,11 +332,12 @@ public:
   // max_sq_error is the maximum -squared- error between the true projection of
   // the shape's edges and the edges in screen space, in pixels.
   //
-  // The projected geometry is appended to the provided R2Shape.
+  // The projected geometry is appended to the provided R2Shape, and a
+  // ChainStitcher must be provided to use if geometry has to be cut.
   //
   // Returns a reference to the passed R2Shape.
   virtual R2Shape& Project(absl::Nonnull<R2Shape *> out,  //
-    const S2Cap& cap, double max_sq_error) const = 0;
+    absl::Nonnull<ChainStitcher*>, const S2Cap& cap, double max_sq_error) const = 0;
 
 
   // Transforms a point from screen space back to world space, if possible.
@@ -402,12 +404,12 @@ public:
     return UnitToWorld(out, point, false);
   }
 
-  R2Shape& Project(absl::Nonnull<R2Shape *> out, const S2Shape &shape) const {
-    return Project(out, shape, kDefaultProjectionErrorSq);
+  R2Shape& Project(absl::Nonnull<R2Shape *> out, absl::Nonnull<ChainStitcher*> stitcher, const S2Shape &shape) const {
+    return Project(out, stitcher, shape, kDefaultProjectionErrorSq);
   }
 
-  R2Shape& Project(absl::Nonnull<R2Shape *> out, const S2Cap &cap) const {
-    return Project(out, cap, kDefaultProjectionErrorSq);
+  R2Shape& Project(absl::Nonnull<R2Shape *> out, absl::Nonnull<ChainStitcher*> stitcher, const S2Cap &cap) const {
+    return Project(out, stitcher, cap, kDefaultProjectionErrorSq);
   }
 
   bool Unproject(absl::Nonnull<S2Point *> out, R2Point point) const {
@@ -497,10 +499,10 @@ public:
   virtual R2Point Project(S2Point pnt) const override;
 
   virtual R2Shape& Project(absl::Nonnull<R2Shape *> out,
-    const S2Shape& shape, double max_sq_error) const override;
+    absl::Nonnull<ChainStitcher*> stitcher, const S2Shape& shape, double max_sq_error) const override;
 
   virtual R2Shape& Project(absl::Nonnull<R2Shape *> out,
-    const S2Cap& cap, double max_sq_error) const override;
+    absl::Nonnull<ChainStitcher*> stitcher, const S2Cap& cap, double max_sq_error) const override;
 
   virtual bool Unproject(
     absl::Nonnull<S2Point *>, R2Point point, bool nearest) const override;
@@ -640,6 +642,7 @@ inline void Projection<Derived>::Subdivide(absl::Nonnull<ChainSink*> out,
 }
 
 
+
 template <typename Derived>
 inline R2Point Projection<Derived>::Project(S2Point pnt) const {
   return projection().UnitToScreen(
@@ -660,7 +663,7 @@ bool Projection<Derived>::Unproject(absl::Nonnull<S2Point*> out, R2Point pnt, bo
 
 
 template <typename Derived>
-R2Shape& Projection<Derived>::Project(absl::Nonnull<R2Shape*> out, const S2Shape& shape, double max_sq_error) const {
+R2Shape& Projection<Derived>::Project(absl::Nonnull<R2Shape*> out, absl::Nonnull<ChainStitcher*> stitcher, const S2Shape& shape, double max_sq_error) const {
   for (int chain_id=0; chain_id < shape.num_chains(); ++chain_id) {
     S2Shape::Chain chain = shape.chain(chain_id);
 
@@ -714,7 +717,7 @@ R2Shape& Projection<Derived>::Project(absl::Nonnull<R2Shape*> out, const S2Shape
 
 template <typename Derived>
 R2Shape& Projection<Derived>::Project(
-  absl::Nonnull<R2Shape*> out, const S2Cap& cap, double max_sq_error) const {
+  absl::Nonnull<R2Shape*> out, absl::Nonnull<ChainStitcher*> stitcher, const S2Cap& cap, double max_sq_error) const {
 
   // Find the center point of the cap and UV vectors forming a basis for points
   // along the cap boundary.
@@ -760,7 +763,7 @@ R2Shape& Projection<Derived>::Project(
   points.emplace_back(CapPoint(0));
 
   // Now project the S2Shape into screen space wholesale.
-  return Project(out, S2LaxPolylineShape(points));
+  return Project(out, stitcher, S2LaxPolylineShape(points));
 }
 
 

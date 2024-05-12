@@ -314,7 +314,7 @@ public:
                 dirty_.Set(shape_id, false);
 
                 pair.r2shape.Clear();
-                projection_->Project(&pair.r2shape, stitch_buffer_, *pair.s2shape);
+                projection_->Project(&pair.r2shape, &chain_stitcher_, *pair.s2shape);
 
                 R2Shape simplified;
                 Simplify(&simplified, pair.r2shape);
@@ -915,6 +915,7 @@ private:
     }
   }
 
+  ChainStitcher chain_stitcher_;
   std::unique_ptr<IProjection> projection_;
   const S2ShapeIndex* index_;
   util::bitmap::Bitmap64 dirty_;

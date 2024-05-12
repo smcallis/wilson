@@ -27,6 +27,7 @@
 // Project requirements
 #include "wilson/generated/land_simplified.h"
 #include "wilson/graphics/pixbuffer.h"
+#include "wilson/chain_stitcher.h"
 #include "wilson/graticule.h"
 #include "wilson/projections.h"
 #include "wilson/quaternion.h"
@@ -89,10 +90,10 @@ public:
       ctx.setFillStyle(pixel(0xff777777));
 
       timeit("fill", "Time to fill land", [&]() {
-        r2shape_.clear();
+        r2shape_.Clear();
         const S2ShapeIndex& index = internal::GetSimplifiedLandIndex();
         for (const S2Shape* shape : index) {
-          projection_->Project(&r2shape_, *shape);
+          projection_->Project(&r2shape_, &chain_stitcher_, *shape);
         }
 
         Simplify(&simplified_, r2shape_);
@@ -115,10 +116,10 @@ public:
       // Convert the viewport into a polygon.  Note we have to check whether the
       // output polygon has significantly less area than the cell union and flip
       // it because it doesn't maintain orientation for very full cell unions.
-      r2shape_.clear();
+      r2shape_.Clear();
       for (S2CellId cell : projection.Viewport()) {
         S2Polygon polygon{S2Cell(cell)};
-        projection_->Project(&r2shape_, S2Polygon::Shape(&polygon));
+        projection_->Project(&r2shape_, &chain_stitcher_, S2Polygon::Shape(&polygon));
       }
 
       ctx.setStrokeStyle(pixel(0x77800000));
@@ -126,11 +127,11 @@ public:
       ctx.fillPath(r2shape_.path());
 
       // Draw the viewcap outline.
-      r2shape_.clear();
+      r2shape_.Clear();
       ctx.setStrokeStyle(pixel(0xff00316e));
       ctx.setStrokeWidth(1);
 
-      projection_->Project(&r2shape_, projection.Viewcap(), 0.1);
+      projection_->Project(&r2shape_, &chain_stitcher_, projection.Viewcap(), 0.1);
       ctx.strokePath(r2shape_.path());
     }
 
@@ -145,7 +146,8 @@ public:
     ctx.restore();
   }
 
-private:
+ private:
+  ChainStitcher chain_stitcher_;
   std::unique_ptr<IProjection> projection_;
   vec2i pos_ = vec2i(0,0);
   Pixbuffer texture_;
