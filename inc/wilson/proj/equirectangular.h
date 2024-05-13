@@ -319,11 +319,7 @@ inline R2Shape& Equirectangular::Project(absl::Nonnull<R2Shape *> out,
       }
     }
     DCHECK_NE(ii, jj);
-    if (ii == jj) {
-      LOG(ERROR) << "Error degenerate crossings";
-      exit(-1);
-    }
-
+    
     const Crossing& incoming = crossings[jj];
 
     // When stitching between the crossings, if the outgoing crossing is on one

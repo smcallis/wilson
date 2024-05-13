@@ -22,6 +22,7 @@
 #include "s2/s2cap.h"
 #include "s2/s2cell.h"
 #include "s2/s2point.h"
+#include "s2/s2predicates.h"
 #include "s2/s2edge_distances.h"
 
 #include "wilson/plane.h"
@@ -133,6 +134,8 @@ struct Orthographic final : Projection<Orthographic> {
     return false;
   }
 
+  R2Shape& Project(absl::Nonnull<R2Shape *> out, absl::Nonnull<ChainStitcher*>, const S2Shape&, double max_sq_error) const override;
+
 protected:
   // Updates the transformation matrices.
   void UpdateTransforms() override {
@@ -155,7 +158,32 @@ protected:
     nadir_plane_ = Plane(nadir());
   }
 
-private:
+ private:
+  // A crossing where an edge crossed the clip plane.
+  struct Crossing {
+    Crossing() = default;
+
+    static Crossing Incoming(const S2Point& point, int vertex) {
+      Crossing crossing;
+      crossing.point = point;
+      crossing.vertex = vertex;
+      crossing.incoming = true;
+      return crossing;
+    }
+
+    static Crossing Outgoing(const S2Point& point, int vertex) {
+      Crossing crossing = Incoming(point, vertex);
+      crossing.incoming = false;
+      return crossing;
+    }
+
+    S2Point point;
+    int vertex;
+    bool incoming;
+  };
+
+  using CrossingVector = absl::InlinedVector<Crossing, 16>;
+
   // Regenerate the graticule path with the current transform.
   void GenerateGraticule(absl::Nonnull<R2Shape*> out) const {
     // Draw lines of longitude.
@@ -367,6 +395,110 @@ void Orthographic::GenerateParallels(absl::Nonnull<R2Shape*> out) const {
     //   );
     // }
   }
+}
+
+inline R2Shape& Orthographic::Project(absl::Nonnull<R2Shape *> out,
+  absl::Nonnull<ChainStitcher*> stitcher, const S2Shape& shape, double max_sq_error) const {
+
+  CrossingVector crossings;
+  stitcher->Clear();
+
+  // If an edge is too long (close to 180 degrees), it's possible that we'll
+  // flip and close it the wrong way around the sphere.  Check if the edge is
+  // too long and sub-sample it before subdivision.
+  const auto SampleAndSubdivide = [&](const S2Shape::Edge& edge) {
+    const double angle = edge.v0.Angle(edge.v1);
+    if (angle >= 0.95*M_PI) {
+      const S2Point u = edge.v0;
+      const S2Point v = nadir().CrossProd(u);
+
+      const S2Point a = edge.v0;
+      const S2Point b = u*std::cos(angle/2) + v*std::sin(angle/2);
+      const S2Point c = edge.v1;
+
+      Subdivide(stitcher, {a, b});
+      Subdivide(stitcher, {b, c});
+    } else {
+      Subdivide(stitcher, {edge.v0, edge.v1});
+    }
+  };
+
+  // Subdivide edges and split chains as needed.
+  for (int chain = 0; chain < shape.num_chains(); ++chain) {
+    stitcher->Break();
+
+    for (int i = 0, n = shape.chain(chain).length; i < n; ++i) {
+      const S2Shape::Edge& edge = shape.chain_edge(chain, i);
+      S2Shape::Edge copy = edge;
+      if (!nadir_plane_.ClipEdgeOnSphere(copy)) {
+        continue;
+      }
+
+      // Next vertex is an incoming crossing.
+      if (copy.v0 != edge.v0) {
+        crossings.push_back(Crossing::Incoming(copy.v0, stitcher->size()));
+      }
+
+      Subdivide(stitcher, copy);
+
+      // Last vertex is an outgoing crossing.
+      if (copy.v1 != edge.v1) {
+        crossings.push_back(Crossing::Outgoing(copy.v1, stitcher->size() - 1));
+        stitcher->Break();
+      }
+    }
+  }
+
+  if (!crossings.empty()) {
+    const S2Point first = crossings[0].point;
+
+    // Sort crossings CCW around the projection boundary.
+    absl::c_sort(crossings, [&](const Crossing& a, const Crossing& b) {
+      return !s2pred::OrderedCCW(b.point, a.point, first, nadir());
+    });
+
+    // Now stitch crossings together.
+    const int ncrossings = crossings.size();
+    for (int ii = 0; ii < ncrossings; ++ii) {
+      DCHECK_NE(crossings[ii].vertex, -1);
+
+      // Skip to an outgoing crossing.
+      const Crossing& outgoing = crossings[ii];
+      if (outgoing.incoming) {
+        continue;
+      }
+
+      // Find the next incoming crossing.
+      int jj = (ii + 1) % ncrossings;
+      for (; jj != ii; jj = (jj + 1) % ncrossings) {
+        if (crossings[jj].incoming) {
+          break;
+        }
+      }
+      DCHECK_NE(ii, jj);
+      const Crossing& incoming = crossings[jj];
+
+      // Subdivide the stitch since it's a geodesic edge.
+      const int beg = stitcher->size();
+      stitcher->Break();
+      SampleAndSubdivide({outgoing.point, incoming.point});
+      const int end = stitcher->size();
+
+      // And splice the subdivided edge into the loop.
+      stitcher->Connect(outgoing.vertex, beg);
+      stitcher->Connect(end - 1, incoming.vertex);
+    }
+  }
+
+  const auto AddChain = [&](absl::Span<const R2Point> vertices) {
+    out->AddChain(vertices, shape.dimension() == 2);
+  };
+
+  if (!stitcher->EmitChains(AddChain)) {
+    fprintf(stderr, "Detected infinite loop splicing chains\n");
+  }
+
+  return *out;
 }
 
 } // namespace w
