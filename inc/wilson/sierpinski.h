@@ -20,9 +20,9 @@ static inline void SierpinskiHole(std::vector<std::unique_ptr<S2Loop>>& loops,
 
   // Move points towards the center slightly.
   const S2Point center = ((abm+bcm+cam)/3).Normalize();
-  S2Point abm2 = S2::Interpolate(abm, center, 0.1);
-  S2Point bcm2 = S2::Interpolate(bcm, center, 0.1);
-  S2Point cam2 = S2::Interpolate(cam, center, 0.1);
+  S2Point abm2 = S2::Interpolate(abm, center, 1e-3);
+  S2Point bcm2 = S2::Interpolate(bcm, center, 1e-3);
+  S2Point cam2 = S2::Interpolate(cam, center, 1e-3);
 
   loops.emplace_back(
     std::make_unique<S2Loop>(std::vector<S2Point>{abm2, cam2, bcm2}));
