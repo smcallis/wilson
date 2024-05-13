@@ -27,6 +27,7 @@
 #include "s2/s2edge_distances.h"
 #include "s2/s2wedge_relations.h"
 
+#include "wilson/chain_stitcher.h"
 #include "wilson/plane.h"
 #include "wilson/projection.h"
 #include "wilson/quaternion.h"
@@ -54,13 +55,11 @@ struct Gnomonic final : Projection<Gnomonic> {
 
   // Edges are always straight lines in gnomonic projections, so we can simplify
   // the subdivision algorithm by not doing it.
-  R2Shape& Subdivide(absl::Nonnull<R2Shape *> out,
-    const S2Shape::Edge& edge, bool add_last, double) const override {
-    out->Append(Project(edge.v0));
-    if (add_last) {
-      out->Append(Project(edge.v1));
+  void Subdivide(absl::Nonnull<ChainSink *> out, const S2Shape::Edge& edge, double) const override {
+    if (out->ChainEmpty()) {
+      out->Append(Project(edge.v0));
     }
-    return *out;
+    out->Append(Project(edge.v1));
   }
 
   // Sets the angle of the cone that's visible in the viewport.  Only the
@@ -90,7 +89,7 @@ struct Gnomonic final : Projection<Gnomonic> {
   // Populates a path representing the outline of the sphere on screen.  May
   // encompass the entire screen.
   R2Shape& MakeOutline(absl::Nonnull<R2Shape *> out) const override {
-    out->clear();
+    out->Clear();
 
     // The gnomonic projection is always a unit circle, we can just multiply the
     // radius by the scale to get the correct size.
@@ -103,7 +102,7 @@ struct Gnomonic final : Projection<Gnomonic> {
 
   // Populates a path with a graticule with lines of latitude and longitude.
   R2Shape& MakeGraticule(absl::Nonnull<R2Shape *> out) const override {
-    out->clear();
+    out->Clear();
     // generate_graticule(path);
     return *out;
   }
@@ -127,7 +126,7 @@ struct Gnomonic final : Projection<Gnomonic> {
     return *edges;
   };
 
-  R2Shape& Stitch(absl::Nonnull<R2Shape *> out, const S2Shape::Edge& edge, const S2Point& v0) const override {
+  void Stitch(absl::Nonnull<R2Shape *> out, const S2Shape::Edge& edge, const S2Point& v0) const override {
     // The visible region is always < a hemisphere in gnomonic projection.  The
     // visible circle is a unit circle so we can stitch two vertices with edges
     // along that circle.
@@ -167,7 +166,6 @@ struct Gnomonic final : Projection<Gnomonic> {
       R2Point pnt(std::cos(beg + i*step), std::sin(beg + i*step));
       out->Append(cc + rr*pnt);
     }
-    return *out;
   }
 
   R2Point WorldToUnit(S2Point p) const override {
@@ -196,6 +194,8 @@ struct Gnomonic final : Projection<Gnomonic> {
     return false;
   }
 
+  R2Shape& Project(absl::Nonnull<R2Shape *> out, absl::Nonnull<ChainStitcher*>, const S2Shape&, double max_sq_error) const override;
+
 protected:
   void UpdateTransforms() override {
     // Recompute the origin of the clip plane from the new view angle.
@@ -205,8 +205,33 @@ protected:
     clip_plane_ = Plane(nadir(), nadir()*sin_angle_);
   }
 
-private:
-  // Regenerate the graticule path with the current transform.
+ private:
+  // A crossing where an edge crossed the clip plane.
+  struct Crossing {
+    Crossing() = default;
+
+    static Crossing Incoming(const S2Point& point, int vertex) {
+      Crossing crossing;
+      crossing.point = point;
+      crossing.vertex = vertex;
+      crossing.incoming = true;
+      return crossing;
+    }
+
+    static Crossing Outgoing(const S2Point& point, int vertex) {
+      Crossing crossing = Incoming(point, vertex);
+      crossing.incoming = false;
+      return crossing;
+    }
+
+    S2Point point;
+    int vertex;
+    bool incoming;
+  };
+
+  using CrossingVector = absl::InlinedVector<Crossing, 16>;
+
+ // Regenerate the graticule path with the current transform.
   void generate_graticule(BLPath& path) const {
     // Draw lines of longitude.
     for (int i=0; i < 36; ++i) {
@@ -555,5 +580,120 @@ void Gnomonic::subdivide(
 //     }
 //   }
 // }
+
+
+inline R2Shape& Gnomonic::Project(absl::Nonnull<R2Shape *> out,
+  absl::Nonnull<ChainStitcher*> stitcher, const S2Shape& shape, double max_sq_error) const {
+
+  CrossingVector crossings;
+  stitcher->Clear();
+
+  // If an edge is too long (close to 180 degrees), it's possible that we'll
+  // flip and close it the wrong way around the sphere.  Check if the edge is
+  // too long and sub-sample it before subdivision.
+  const auto SampleAndSubdivide = [&](const S2Shape::Edge& edge) {
+    const double angle = edge.v0.Angle(edge.v1);
+    if (angle >= 0.95*M_PI) {
+      const S2Point u = edge.v0;
+      const S2Point v = nadir().CrossProd(u);
+
+      const S2Point a = edge.v0;
+      const S2Point b = u*std::cos(angle/2) + v*std::sin(angle/2);
+      const S2Point c = edge.v1;
+
+      Subdivide(stitcher, {a, b}, max_sq_error);
+      Subdivide(stitcher, {b, c}, max_sq_error);
+    } else {
+      Subdivide(stitcher, {edge.v0, edge.v1}, max_sq_error);
+    }
+  };
+
+  // Subdivide edges and split chains as needed.
+  for (int chain = 0; chain < shape.num_chains(); ++chain) {
+    stitcher->Break();
+
+    int start = stitcher->size();
+    for (int i = 0, n = shape.chain(chain).length; i < n; ++i) {
+      const S2Shape::Edge& edge = shape.chain_edge(chain, i);
+      S2Shape::Edge copy = edge;
+      if (!clip_plane_.ClipEdgeOnSphere(copy)) {
+        continue;
+      }
+
+      // Next vertex is an incoming crossing.
+      if (copy.v0 != edge.v0) {
+        crossings.push_back(Crossing::Incoming(copy.v0, stitcher->size()));
+      }
+
+      Subdivide(stitcher, copy, max_sq_error);
+
+      // Last vertex is an outgoing crossing.
+      if (copy.v1 != edge.v1) {
+        crossings.push_back(Crossing::Outgoing(copy.v1, stitcher->size() - 1));
+        stitcher->Break();
+      }
+    }
+
+    // Ensure that polygon chains are closed properly if need be.
+    if (shape.dimension() == 2) {
+      if (stitcher->size() > start && (*stitcher)[start] == stitcher->back()) {
+        stitcher->pop_back();
+        stitcher->Connect(stitcher->size()-1, start);
+      }
+    }
+  }
+
+  if (!crossings.empty()) {
+    const S2Point first = crossings[0].point;
+
+    // Sort crossings CCW around the projection boundary.
+    absl::c_sort(crossings, [&](const Crossing& a, const Crossing& b) {
+      return !s2pred::OrderedCCW(b.point, a.point, first, nadir());
+    });
+
+    // Now stitch crossings together.
+    const int ncrossings = crossings.size();
+    for (int ii = 0; ii < ncrossings; ++ii) {
+      DCHECK_NE(crossings[ii].vertex, -1);
+
+      // Skip to an outgoing crossing.
+      const Crossing& outgoing = crossings[ii];
+      if (outgoing.incoming) {
+        continue;
+      }
+
+      // Find the next incoming crossing.
+      int jj = (ii + 1) % ncrossings;
+      for (; jj != ii; jj = (jj + 1) % ncrossings) {
+        if (crossings[jj].incoming) {
+          break;
+        }
+      }
+      DCHECK_NE(ii, jj);
+      const Crossing& incoming = crossings[jj];
+
+      // Subdivide the stitch since it's a geodesic edge.
+      const int beg = stitcher->size();
+      stitcher->Break();
+      SampleAndSubdivide({outgoing.point, incoming.point});
+      const int end = stitcher->size();
+
+      // And splice the subdivided edge into the loop.
+      stitcher->Connect(outgoing.vertex, beg);
+      stitcher->Connect(end - 1, incoming.vertex);
+    }
+  }
+
+  const auto AddChain = [&](absl::Span<const R2Point> vertices) {
+    out->AddChain(vertices, shape.dimension() == 2);
+  };
+
+  if (!stitcher->EmitChains(AddChain)) {
+    fprintf(stderr, "Detected infinite loop splicing chains\n");
+  }
+
+  return *out;
+}
+
 
 } // namespace w
