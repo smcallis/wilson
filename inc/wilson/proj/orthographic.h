@@ -427,6 +427,7 @@ inline R2Shape& Orthographic::Project(absl::Nonnull<R2Shape *> out,
   for (int chain = 0; chain < shape.num_chains(); ++chain) {
     stitcher->Break();
 
+    int start = stitcher->size();
     for (int i = 0, n = shape.chain(chain).length; i < n; ++i) {
       const S2Shape::Edge& edge = shape.chain_edge(chain, i);
       S2Shape::Edge copy = edge;
@@ -445,6 +446,14 @@ inline R2Shape& Orthographic::Project(absl::Nonnull<R2Shape *> out,
       if (copy.v1 != edge.v1) {
         crossings.push_back(Crossing::Outgoing(copy.v1, stitcher->size() - 1));
         stitcher->Break();
+      }
+    }
+
+    // Ensure that polygon chains are closed properly if need be.
+    if (shape.dimension() == 2) {
+      if (stitcher->size() > start && (*stitcher)[start] == stitcher->back()) {
+        stitcher->pop_back();
+        stitcher->Connect(stitcher->size()-1, start);
       }
     }
   }
