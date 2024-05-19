@@ -134,7 +134,7 @@ struct Orthographic final : Projection<Orthographic> {
     return false;
   }
 
-  R2Shape& Project(absl::Nonnull<R2Shape *> out, absl::Nonnull<ChainStitcher*>, const S2Shape&, double max_sq_error) const override;
+  R2Shape& Project(absl::Nonnull<R2Shape *> out, absl::Nonnull<ChainStitcher*>, const S2Shape&, double max_sq_error, ContainsPointFn contains) const override;
 
 protected:
   // Updates the transformation matrices.
@@ -398,7 +398,7 @@ void Orthographic::GenerateParallels(absl::Nonnull<R2Shape*> out) const {
 }
 
 inline R2Shape& Orthographic::Project(absl::Nonnull<R2Shape *> out,
-  absl::Nonnull<ChainStitcher*> stitcher, const S2Shape& shape, double max_sq_error) const {
+  absl::Nonnull<ChainStitcher*> stitcher, const S2Shape& shape, double max_sq_error, ContainsPointFn contains) const {
 
   CrossingVector crossings;
   stitcher->Clear();

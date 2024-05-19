@@ -19,6 +19,7 @@
 #include <optional>
 #include <utility>
 
+#include "absl/functional/bind_front.h"
 #include "blend2d.h"
 #include "s2/s2cap.h"
 #include "s2/s2cell.h"
@@ -40,6 +41,10 @@ struct Equirectangular final : Projection<Equirectangular> {
 
   // Equirectangular requires a 2:1 aspect ratio fit into the visible region.
   static constexpr double kAspectRatio = 2.0;
+
+  S2Cap Viewcap() const override {
+    return S2Cap::Full();
+  }
 
   void UpdateTransforms() override final {
     // The equirectangular projection is always a rectangle with 2:1 aspect
@@ -66,10 +71,10 @@ struct Equirectangular final : Projection<Equirectangular> {
   // encompass the entire screen.
   R2Shape& MakeOutline(absl::Nonnull<R2Shape*> out) const override {
     out->Clear();
-    out->Append(R2Point(outline_.lo().x(), outline_.lo().y()));
-    out->Append(R2Point(outline_.hi().x(), outline_.lo().y()));
-    out->Append(R2Point(outline_.hi().x(), outline_.hi().y()));
     out->Append(R2Point(outline_.lo().x(), outline_.hi().y()));
+    out->Append(R2Point(outline_.hi().x(), outline_.hi().y()));
+    out->Append(R2Point(outline_.hi().x(), outline_.lo().y()));
+    out->Append(R2Point(outline_.lo().x(), outline_.lo().y()));
     out->CloseChain();
     return *out;
   }
@@ -101,7 +106,7 @@ struct Equirectangular final : Projection<Equirectangular> {
   }
 
   R2Point WorldToUnit(S2Point p) const override {
-    return scale()*R2Point(std::atan2(p.y(), p.x())/M_PI, -std::asin(p.z())/M_PI);
+    return scale()*R2Point(std::atan2(p.y(), p.x()) / M_PI, -std::asin(p.z()) / M_PI);
   }
 
   bool UnitToWorld(absl::Nonnull<S2Point*> out, R2Point proj, bool nearest=false) const override {
@@ -127,7 +132,7 @@ struct Equirectangular final : Projection<Equirectangular> {
     return true;
   }
 
-  R2Shape& Project(absl::Nonnull<R2Shape *> out, absl::Nonnull<ChainStitcher*>, const S2Shape&, double max_sq_error) const override;
+  R2Shape& Project(absl::Nonnull<R2Shape *> out, absl::Nonnull<ChainStitcher*>, const S2Shape&, double max_sq_error, ContainsPointFn contains) const override;
 
 private:
   region2 outline_;
@@ -184,7 +189,7 @@ private:
     // Find the intersection point, flip it to the correct half of the sphere
     // based on the orientation of the vertices across the anti-meridian.
     S2Point isect = edge.v0.CrossProd(edge.v1).CrossProd(amnorm).Normalize();
-    if (sign1-sign0 > 0) {
+    if (sign1 - sign0 > 0) {
       isect = -isect;
     }
 
@@ -221,8 +226,8 @@ private:
       edges->emplace_back(edge1);
 
       if (crossings) {
-        crossings->push_back(Crossing::Outgoing(-1, sign0 < 0 ? 1 : 0));
-        crossings->push_back(Crossing::Incoming(-1, sign1 < 0 ? 1 : 0));
+        crossings->push_back(Crossing::Outgoing(-1, sign0 > 0 ? 0 : 1));
+        crossings->push_back(Crossing::Incoming(-1, sign0 > 0 ? 1 : 0));
       }
 
       return *edges;
@@ -246,7 +251,9 @@ private:
 
 
 inline R2Shape& Equirectangular::Project(absl::Nonnull<R2Shape *> out,
-  absl::Nonnull<ChainStitcher*> stitcher, const S2Shape& shape, double max_sq_error) const {
+  absl::Nonnull<ChainStitcher*> stitcher, const S2Shape& shape, double max_sq_error, ContainsPointFn contains) const {
+
+  const bool is_polygon = shape.dimension() == 2;
 
   EdgeList edges;
   CrossingVector crossings;
@@ -280,12 +287,24 @@ inline R2Shape& Equirectangular::Project(absl::Nonnull<R2Shape *> out,
     }
 
     // Ensure that polygon chains are closed properly if need be.
-    if (shape.dimension() == 2) {
-      if (stitcher->size() > start && (*stitcher)[start] == stitcher->back()) {
+    if (is_polygon) {
+      if (stitcher->size() > start && stitcher->back() == (*stitcher)[start]) {
         stitcher->pop_back();
         stitcher->Connect(stitcher->size()-1, start);
       }
     }
+  }
+
+  // if there's no crossings, the polygon must entirely contain or not contain
+  // the boundary of the projection.  Test the image of the north pole to
+  // determine which.
+  const S2Point north_pole = Unrotate({0, 0, 1});
+  if (is_polygon && crossings.empty() && contains(north_pole)) {
+    out->Append(R2Point(outline_.lo().x(), outline_.hi().y()));
+    out->Append(R2Point(outline_.hi().x(), outline_.hi().y()));
+    out->Append(R2Point(outline_.hi().x(), outline_.lo().y()));
+    out->Append(R2Point(outline_.lo().x(), outline_.lo().y()));
+    out->CloseChain();
   }
 
   // Sort crossings CCW around the projection boundary.
@@ -293,16 +312,24 @@ inline R2Shape& Equirectangular::Project(absl::Nonnull<R2Shape *> out,
     if (a.boundary < b.boundary) return true;
     if (a.boundary > b.boundary) return false;
 
+    const double ay = (*stitcher)[a.vertex].y();
+    const double by = (*stitcher)[b.vertex].y();
+
+    if (ay == by) {
+      // Sort by outgoing crossings first.
+      return a.incoming < b.incoming;
+    }
+
+    // Note that these are in screen space, so Y increases -down-.
     if (a.boundary == 0) {
-      return (*stitcher)[a.vertex].y() > (*stitcher)[b.vertex].y();
+      return ay > by;
     } else {
-      return (*stitcher)[a.vertex].y() < (*stitcher)[b.vertex].y();
+      return ay < by;
     }
   });
 
   // Now stitch crossings together.
-  const int ncrossings = crossings.size();
-  for (int ii = 0; ii < ncrossings; ++ii) {
+  for (int ii = 0, N = crossings.size(); ii < N; ++ii) {
     DCHECK_NE(crossings[ii].vertex, -1);
 
     // Skip to an outgoing crossing.
@@ -311,23 +338,17 @@ inline R2Shape& Equirectangular::Project(absl::Nonnull<R2Shape *> out,
       continue;
     }
 
-    // Find the next incoming crossing.
-    int jj = (ii + 1) % ncrossings;
-    for (; jj != ii; jj = (jj + 1) % ncrossings) {
-      if (crossings[jj].incoming) {
-        break;
-      }
-    }
-    DCHECK_NE(ii, jj);
-    
-    const Crossing& incoming = crossings[jj];
+    // The next crossing -should- be an incoming crossing topologically.
+    const int next = (ii + 1) % N;
+    const Crossing& incoming = crossings[next];
+    DCHECK(incoming.incoming);
 
     // When stitching between the crossings, if the outgoing crossing is on one
     // boundary and the incoming crossing is on the other, we have to stitch
     // over one or both of the poles.
     absl::InlinedVector<int, 4> corners;
     if (outgoing.boundary == incoming.boundary) {
-      if (ii > jj) {
+      if (ii > next) {
         // Crossings on the same boundary but outgoing was after incoming so we
         // have to walk all the way around the corners.
         if (outgoing.boundary == 0) {
@@ -366,7 +387,7 @@ inline R2Shape& Equirectangular::Project(absl::Nonnull<R2Shape *> out,
   };
 
   if (!stitcher->EmitChains(AddChain)) {
-    fprintf(stderr, "Detected infinite loop splicing chains\n");
+    fprintf(stderr, "[Equirectangular] Detected infinite loop splicing chains!\n");
   }
 
   return *out;

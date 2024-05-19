@@ -29,6 +29,7 @@
 #include "s2/s2region_coverer.h"
 #include "s2/s2shape.h"
 #include "s2/s2edge_distances.h"
+#include "s2/s2contains_point_query.h"
 
 #include "wilson/graphics/pixel.h"
 #include "wilson/chain_sink.h"
@@ -142,10 +143,31 @@ namespace w {
 // WorldToUnit transformation (via implementations of Project()).
 //
 
+// Builds a function that takes an S2Point and returns whether a particular
+// shape in an S2ShapeIndex contains it.  The input index must live at least as
+// long as the returned function.
+static inline absl::AnyInvocable<bool(const S2Point&) const> IndexedContains(
+    const S2ShapeIndex& index, int shape_id) {
+  const S2Shape& shape = *index.shape(shape_id);
+  S2ContainsPointQuery<S2ShapeIndex> query(&index);
+
+  return [&, query = std::move(query)](const S2Point& point) {
+    return query.ShapeContains(shape, point);
+  };
+}
+
 class IProjection {
 public:
   // The default distance-squared error (in pixels) when subdividing.
   static constexpr double kDefaultProjectionErrorSq = 0.25*0.25;
+
+  // Returns true if a shape contains a given point, false otherwise.
+  using ContainsPointFn = absl::FunctionRef<bool(const S2Point&) const>;
+
+  // Default containment function that always returns false.
+  static bool DefaultContainsFn(const S2Point&) {
+    return false;
+  }
 
   // A simple struct to store scale and rotation values for the projection.
   struct Transform {
@@ -312,6 +334,10 @@ public:
   // Projects an entire S2Shape into screen space, returning a polygon with its
   // edges clipped, stitched and subdivided as needed.
   //
+  // When clipping polygons, a callback must be provided that can be used to
+  // test whether a single point is contained in the polygon.  The default
+  // always returns false and is suitable for points and polylines.
+  //
   // Implementations must maintain polygon closure when interiors are clipped
   // across projection boundaries by Stitch()-ing edges that cross the boundary
   // together.
@@ -323,7 +349,7 @@ public:
   //
   // Returns a reference to the passed R2Shape.
   virtual R2Shape& Project(absl::Nonnull<R2Shape *> out,  //
-    absl::Nonnull<ChainStitcher*>, const S2Shape& shape, double max_sq_error) const = 0;
+    absl::Nonnull<ChainStitcher*>, const S2Shape& shape, double max_sq_error, ContainsPointFn contains = DefaultContainsFn) const = 0;
 
 
   // Projects an S2Cap into screen space, returning a polygon with its edges
@@ -404,8 +430,8 @@ public:
     return UnitToWorld(out, point, false);
   }
 
-  R2Shape& Project(absl::Nonnull<R2Shape *> out, absl::Nonnull<ChainStitcher*> stitcher, const S2Shape &shape) const {
-    return Project(out, stitcher, shape, kDefaultProjectionErrorSq);
+  R2Shape& Project(absl::Nonnull<R2Shape *> out, absl::Nonnull<ChainStitcher*> stitcher, const S2Shape &shape, ContainsPointFn contains = DefaultContainsFn) const {
+    return Project(out, stitcher, shape, kDefaultProjectionErrorSq, contains);
   }
 
   R2Shape& Project(absl::Nonnull<R2Shape *> out, absl::Nonnull<ChainStitcher*> stitcher, const S2Cap &cap) const {
@@ -499,7 +525,7 @@ public:
   virtual R2Point Project(S2Point pnt) const override;
 
   virtual R2Shape& Project(absl::Nonnull<R2Shape *> out,
-    absl::Nonnull<ChainStitcher*> stitcher, const S2Shape& shape, double max_sq_error) const override;
+    absl::Nonnull<ChainStitcher*> stitcher, const S2Shape& shape, double max_sq_error, ContainsPointFn contains) const override;
 
   virtual R2Shape& Project(absl::Nonnull<R2Shape *> out,
     absl::Nonnull<ChainStitcher*> stitcher, const S2Cap& cap, double max_sq_error) const override;
@@ -663,7 +689,7 @@ bool Projection<Derived>::Unproject(absl::Nonnull<S2Point*> out, R2Point pnt, bo
 
 
 template <typename Derived>
-R2Shape& Projection<Derived>::Project(absl::Nonnull<R2Shape*> out, absl::Nonnull<ChainStitcher*> stitcher, const S2Shape& shape, double max_sq_error) const {
+R2Shape& Projection<Derived>::Project(absl::Nonnull<R2Shape*> out, absl::Nonnull<ChainStitcher*> stitcher, const S2Shape& shape, double max_sq_error, ContainsPointFn contains) const {
   for (int chain_id=0; chain_id < shape.num_chains(); ++chain_id) {
     S2Shape::Chain chain = shape.chain(chain_id);
 

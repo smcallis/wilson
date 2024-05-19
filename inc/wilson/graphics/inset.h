@@ -29,6 +29,7 @@
 #include "wilson/graphics/pixbuffer.h"
 #include "wilson/chain_stitcher.h"
 #include "wilson/graticule.h"
+#include "wilson/projection.h"
 #include "wilson/projections.h"
 #include "wilson/quaternion.h"
 #include "wilson/region.h"
@@ -119,7 +120,9 @@ public:
       r2shape_.Clear();
       for (S2CellId cell : projection.Viewport()) {
         S2Polygon polygon{S2Cell(cell)};
-        projection_->Project(&r2shape_, &chain_stitcher_, S2Polygon::Shape(&polygon));
+        projection_->Project(&r2shape_, &chain_stitcher_,
+                             S2Polygon::Shape(&polygon),
+          [&](const S2Point& point) { return polygon.Contains(point); });
       }
 
       ctx.setStrokeStyle(pixel(0x77800000));
