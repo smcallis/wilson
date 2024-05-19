@@ -32,7 +32,9 @@ static inline void SierpinskiHole(std::vector<std::unique_ptr<S2Loop>>& loops,
   SierpinskiHole(loops, c, cam, bcm, max_level, level+1);
 }
 
-static inline S2Polygon Sierpinski(int max_level = 4) { //
+// Generates a Sierpinski triangle with the given level of hole recursion.  If
+// `invert` is true, then the triangle is turned inside out.
+static inline S2Polygon Sierpinski(int max_level = 4, bool invert = false) { //
   const S2Point a = S2LatLng::FromDegrees(-40, -40).ToPoint();
   const S2Point b = S2LatLng::FromDegrees(-40, +40).ToPoint();
   const S2Point c = S2LatLng::FromDegrees(+40, 0).ToPoint();
@@ -44,6 +46,9 @@ static inline S2Polygon Sierpinski(int max_level = 4) { //
 
   S2Polygon fractal;
   fractal.InitOriented(std::move(loops));
+  if (invert) {
+    fractal.Invert();
+  }
   return fractal;
 }
 
