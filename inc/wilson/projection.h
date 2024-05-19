@@ -146,12 +146,12 @@ namespace w {
 // Builds a function that takes an S2Point and returns whether a particular
 // shape in an S2ShapeIndex contains it.  The input index must live at least as
 // long as the returned function.
-static inline absl::AnyInvocable<bool(const S2Point&) const> IndexedContains(
+static inline absl::AnyInvocable<bool(const S2Point&)> IndexedContains(
     const S2ShapeIndex& index, int shape_id) {
   const S2Shape& shape = *index.shape(shape_id);
   S2ContainsPointQuery<S2ShapeIndex> query(&index);
 
-  return [&, query = std::move(query)](const S2Point& point) {
+  return [&, query = std::move(query)](const S2Point& point) mutable {
     return query.ShapeContains(shape, point);
   };
 }
@@ -162,7 +162,7 @@ public:
   static constexpr double kDefaultProjectionErrorSq = 0.25*0.25;
 
   // Returns true if a shape contains a given point, false otherwise.
-  using ContainsPointFn = absl::FunctionRef<bool(const S2Point&) const>;
+  using ContainsPointFn = absl::AnyInvocable<bool(const S2Point&)>;
 
   // Default containment function that always returns false.
   static bool DefaultContainsFn(const S2Point&) {
@@ -431,7 +431,7 @@ public:
   }
 
   R2Shape& Project(absl::Nonnull<R2Shape *> out, absl::Nonnull<ChainStitcher*> stitcher, const S2Shape &shape, ContainsPointFn contains = DefaultContainsFn) const {
-    return Project(out, stitcher, shape, kDefaultProjectionErrorSq, contains);
+    return Project(out, stitcher, shape, kDefaultProjectionErrorSq, std::move(contains));
   }
 
   R2Shape& Project(absl::Nonnull<R2Shape *> out, absl::Nonnull<ChainStitcher*> stitcher, const S2Cap &cap) const {
