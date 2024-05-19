@@ -39,13 +39,23 @@ class ChainStitcher : public ChainSink {
   }
 
   // Break the current chain, the next vertex appended will be unconnected.
-  void Break() override{
+  void Break() override {
     last_ = kUnconnected;
     chain_size_ = 0;
   }
 
+  // Skip the next appended point.
+  void SkipNext() {
+    skip_ = true;
+  }
+
   // Appends a new vertex to the buffer, connecting it to the previous vertex.
   void Append(const R2Point& point) override {
+    if (skip_) {
+      skip_ = false;
+      return;
+    }
+
     const int curr = vertices_.size();
     vertices_.emplace_back(point);
     ++chain_size_;
@@ -64,11 +74,17 @@ class ChainStitcher : public ChainSink {
       return;
     }
 
+    int start = 0;
+    if (skip_) {
+      ++start;
+      skip_ = false;
+    }
+
     // Append first vertex manually.  We definite have a last_ now.
-    Append(points[0]);
+    Append(points[start]);
 
     // Append the rest of the points.
-    for (int i = 1, n = points.size(); i < n; ++i) {
+    for (int i = start + 1, n = points.size(); i < n; ++i) {
       const int curr = vertices_.size();
       vertices_.emplace_back(points[i]);
       nexts_[last_] = curr;
@@ -177,6 +193,7 @@ class ChainStitcher : public ChainSink {
   }
 
  private:
+  bool skip_ = false;
   int chain_size_ = 0;
   int last_ = kUnconnected;
 
