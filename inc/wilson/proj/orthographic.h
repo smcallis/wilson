@@ -400,24 +400,36 @@ void Orthographic::GenerateParallels(absl::Nonnull<R2Shape*> out) const {
 inline R2Shape& Orthographic::Project(absl::Nonnull<R2Shape *> out,
   absl::Nonnull<ChainStitcher*> stitcher, const S2Shape& shape, double max_sq_error, ContainsPointFn contains) const {
 
+  const bool is_polygon = shape.dimension() == 2;
+
   CrossingVector crossings;
   stitcher->Clear();
 
   // If an edge is too long (close to 180 degrees), it's possible that we'll
   // flip and close it the wrong way around the sphere.  Check if the edge is
   // too long and sub-sample it before subdivision.
-  const auto SampleAndSubdivide = [&](const S2Shape::Edge& edge) {
-    const double angle = edge.v0.Angle(edge.v1);
-    if (angle >= 0.95*M_PI) {
+  const auto SampleAndSubdivide = [&](const S2Shape::Edge& edge, bool large=false) {
+    // Find the oriented angle between the vertices around the nadir() vector.
+    const auto dab = edge.v0.DotProd(edge.v1);
+    const auto xab = edge.v0.CrossProd(edge.v1);
+
+    double angle = std::atan2(xab.Norm(), dab);
+    if (xab.DotProd(nadir()) < 0 || large) {
+      angle = 2*M_PI - angle;
+    }
+
+    if (angle >= 0.95 * M_PI) {
       const S2Point u = edge.v0;
       const S2Point v = nadir().CrossProd(u);
 
       const S2Point a = edge.v0;
-      const S2Point b = u*std::cos(angle/2) + v*std::sin(angle/2);
-      const S2Point c = edge.v1;
+      const S2Point b = u*std::cos(1*angle/3) + v*std::sin(1*angle/3);
+      const S2Point c = u*std::cos(2*angle/3) + v*std::sin(2*angle/3);
+      const S2Point d = edge.v1;
 
       Subdivide(stitcher, {a, b});
       Subdivide(stitcher, {b, c});
+      Subdivide(stitcher, {c, d});
     } else {
       Subdivide(stitcher, {edge.v0, edge.v1});
     }
@@ -431,18 +443,20 @@ inline R2Shape& Orthographic::Project(absl::Nonnull<R2Shape *> out,
     for (int i = 0, n = shape.chain(chain).length; i < n; ++i) {
       const S2Shape::Edge& edge = shape.chain_edge(chain, i);
       S2Shape::Edge copy = edge;
+
+      // If the edge is completely clipped out, ignore it.
       if (!nadir_plane_.ClipEdgeOnSphere(copy)) {
         continue;
       }
 
-      // Next vertex is an incoming crossing.
+      // If vertex 0 was modified during clipping, this is an incoming edge.
       if (copy.v0 != edge.v0) {
         crossings.push_back(Crossing::Incoming(copy.v0, stitcher->size()));
       }
 
       Subdivide(stitcher, copy);
 
-      // Last vertex is an outgoing crossing.
+      // If vertex 1 was modified during clipping, this is an outgoing edge.
       if (copy.v1 != edge.v1) {
         crossings.push_back(Crossing::Outgoing(copy.v1, stitcher->size() - 1));
         stitcher->Break();
@@ -458,17 +472,65 @@ inline R2Shape& Orthographic::Project(absl::Nonnull<R2Shape *> out,
     }
   }
 
-  if (!crossings.empty()) {
-    const S2Point first = crossings[0].point;
+  const auto AddChain = [&](absl::Span<const R2Point> vertices) {
+    out->AddChain(vertices, shape.dimension() == 2);
+  };
 
-    // Sort crossings CCW around the projection boundary.
+  // If the shape isn't a polygon we don't need to close chains.
+  if (!is_polygon) {
+    if (!stitcher->EmitChains(AddChain)) {
+      stitcher->EmitChains([](auto) {});
+      stitcher->set_debug(false);
+    }
+  }
+
+  if (crossings.empty()) {
+    // If there's no crossings, the polygon either entirely includes the edge
+    // of the projection or entirely doesn't.  Test one point on it for
+    // containment to break the tie.
+    if (contains(nadir().Ortho())) {
+      S2Point u = nadir().Ortho();
+      stitcher->Break();
+      const int beg = stitcher->size();
+      SampleAndSubdivide({u, u}, true);
+
+      stitcher->pop_back();
+      stitcher->Connect(stitcher->size() - 1, beg);
+      stitcher->Break();
+    }
+  } else {
+    // Sort crossings CCW around the projection boundary.  We want to start
+    // from an outgoing crossing, so sort relative to the first one.
+    std::optional<S2Point> first;
+    for (const Crossing& crossing : crossings) {
+      if (!crossing.incoming) {
+        first = crossing.point;
+        break;
+      }
+    }
+    DCHECK(first);
+
     absl::c_sort(crossings, [&](const Crossing& a, const Crossing& b) {
-      return !s2pred::OrderedCCW(b.point, a.point, first, nadir());
+      // The first point comes before all others.
+      if (a.point == *first) {
+        if (b.point == *first) {
+          return a.incoming < b.incoming;
+        }
+        return true;
+      }
+
+      // OrderedCCW returns true when the points are equal, and we want it to be
+      // false because we want a < comparison here, not <=.  So check for equality
+      // explicitly.
+      if (a.point == b.point) {
+        // Sort by outgoing edges first.
+        return a.incoming < b.incoming;
+      }
+      return s2pred::OrderedCCW(*first, a.point, b.point, nadir());
     });
 
     // Now stitch crossings together.
-    const int ncrossings = crossings.size();
-    for (int ii = 0; ii < ncrossings; ++ii) {
+    for (int ii = 0, N = crossings.size(); ii < N; ++ii) {
       DCHECK_NE(crossings[ii].vertex, -1);
 
       // Skip to an outgoing crossing.
@@ -477,34 +539,31 @@ inline R2Shape& Orthographic::Project(absl::Nonnull<R2Shape *> out,
         continue;
       }
 
-      // Find the next incoming crossing.
-      int jj = (ii + 1) % ncrossings;
-      for (; jj != ii; jj = (jj + 1) % ncrossings) {
-        if (crossings[jj].incoming) {
-          break;
-        }
-      }
-      DCHECK_NE(ii, jj);
-      const Crossing& incoming = crossings[jj];
+      // The next crossing -should- be an incoming crossing topologically.
+      const Crossing& incoming = crossings[(ii + 1) % N];
+      DCHECK(incoming.incoming);
 
       // Subdivide the stitch since it's a geodesic edge.
       const int beg = stitcher->size();
       stitcher->Break();
+      stitcher->SkipNext(); // Don't repeat the outgoing point.
       SampleAndSubdivide({outgoing.point, incoming.point});
-      const int end = stitcher->size();
+
+      // Don't repeat the incoming point.
+      stitcher->pop_back();
 
       // And splice the subdivided edge into the loop.
-      stitcher->Connect(outgoing.vertex, beg);
-      stitcher->Connect(end - 1, incoming.vertex);
+      if (stitcher->size() - beg == 0) {
+        stitcher->Connect(outgoing.vertex, incoming.vertex);
+      } else {
+        stitcher->Connect(outgoing.vertex, beg);
+        stitcher->Connect(stitcher->size() - 1, incoming.vertex);
+      }
     }
   }
 
-  const auto AddChain = [&](absl::Span<const R2Point> vertices) {
-    out->AddChain(vertices, shape.dimension() == 2);
-  };
-
   if (!stitcher->EmitChains(AddChain)) {
-    fprintf(stderr, "Detected infinite loop splicing chains\n");
+    stitcher->EmitChains([](auto) {});
   }
 
   return *out;
