@@ -70,28 +70,25 @@ class ChainStitcher : public ChainSink {
 
   // Appends a span of vertices to the buffer.
   void Append(absl::Span<const R2Point> points) override {
-    if (points.empty()) {
-      return;
-    }
-
     int start = 0;
     if (skip_) {
       ++start;
       skip_ = false;
     }
 
-    // Append first vertex manually.  We definite have a last_ now.
-    Append(points[start]);
-
     // Append the rest of the points.
-    for (int i = start + 1, n = points.size(); i < n; ++i) {
+    for (int i = start, n = points.size(); i < n; ++i) {
       const int curr = vertices_.size();
       vertices_.emplace_back(points[i]);
-      nexts_[last_] = curr;
+
+      if (last_ != kUnconnected) {
+        nexts_[last_] = curr;
+      }
+
       nexts_.emplace_back(kUnconnected);
       last_ = curr;
+      ++chain_size_;
     }
-    chain_size_ += (points.size() - 1);
   }
 
   ssize_t ChainSize() const {
@@ -139,8 +136,6 @@ class ChainStitcher : public ChainSink {
     while (unseen.FindFirstSetBit(&start)) {
       scratch_.clear();
 
-      //fprintf(stderr, "chain\n");
-
       // We'll try to emit vertices in-place from the vertices array.
       bool in_place = true;
 
@@ -167,15 +162,14 @@ class ChainStitcher : public ChainSink {
         }
 
         // We should emit each vertex once so if we total up to more than the
-        // total number of vertices, then we must have hit an infinite.
+        // total number of vertices, then we must have hit an infinite loop.
         if (++cnt > total_vertices) {
           return false;
         }
 
-        // fprintf(stderr, "curr: %zd  cnt: %zd  next: %zd\n", cur, cnt, nexts_[cur]);
-
         unseen.Set(cur, false);
         cur = nexts_[cur];
+
       } while (cur != kUnconnected && cur != start);
 
       if (in_place) {

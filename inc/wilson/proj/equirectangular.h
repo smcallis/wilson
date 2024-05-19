@@ -338,17 +338,23 @@ inline R2Shape& Equirectangular::Project(absl::Nonnull<R2Shape *> out,
       continue;
     }
 
-    // The next crossing -should- be an incoming crossing topologically.
-    const int next = (ii + 1) % N;
-    const Crossing& incoming = crossings[next];
-    DCHECK(incoming.incoming);
+    // Find the next incoming crossing.  Since vertices can land on the same
+    // point, it may not necessarily be the next vertex, but should exist.
+    int jj = (ii + 1) % N;
+    for (; jj != ii; jj = (jj + 1) % N) {
+      if (crossings[jj].incoming) {
+        break;
+      }
+    }
+    DCHECK_NE(ii, jj);
+    const Crossing& incoming = crossings[jj];
 
     // When stitching between the crossings, if the outgoing crossing is on one
     // boundary and the incoming crossing is on the other, we have to stitch
     // over one or both of the poles.
     absl::InlinedVector<int, 4> corners;
     if (outgoing.boundary == incoming.boundary) {
-      if (ii > next) {
+      if (ii > jj) {
         // Crossings on the same boundary but outgoing was after incoming so we
         // have to walk all the way around the corners.
         if (outgoing.boundary == 0) {

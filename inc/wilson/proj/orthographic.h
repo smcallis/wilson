@@ -408,13 +408,13 @@ inline R2Shape& Orthographic::Project(absl::Nonnull<R2Shape *> out,
   // If an edge is too long (close to 180 degrees), it's possible that we'll
   // flip and close it the wrong way around the sphere.  Check if the edge is
   // too long and sub-sample it before subdivision.
-  const auto SampleAndSubdivide = [&](const S2Shape::Edge& edge, bool large=false) {
+  const auto SampleAndSubdivide = [&](const S2Shape::Edge& edge, bool large_arc = false) {
     // Find the oriented angle between the vertices around the nadir() vector.
     const auto dab = edge.v0.DotProd(edge.v1);
     const auto xab = edge.v0.CrossProd(edge.v1);
 
     double angle = std::atan2(xab.Norm(), dab);
-    if (xab.DotProd(nadir()) < 0 || large) {
+    if (large_arc || xab.DotProd(nadir()) < 0) {
       angle = 2*M_PI - angle;
     }
 
@@ -427,11 +427,11 @@ inline R2Shape& Orthographic::Project(absl::Nonnull<R2Shape *> out,
       const S2Point c = u*std::cos(2*angle/3) + v*std::sin(2*angle/3);
       const S2Point d = edge.v1;
 
-      Subdivide(stitcher, {a, b});
-      Subdivide(stitcher, {b, c});
-      Subdivide(stitcher, {c, d});
+      Subdivide(stitcher, {a, b}, max_sq_error);
+      Subdivide(stitcher, {b, c}, max_sq_error);
+      Subdivide(stitcher, {c, d}, max_sq_error);
     } else {
-      Subdivide(stitcher, {edge.v0, edge.v1});
+      Subdivide(stitcher, {edge.v0, edge.v1}, max_sq_error);
     }
   };
 
@@ -454,7 +454,7 @@ inline R2Shape& Orthographic::Project(absl::Nonnull<R2Shape *> out,
         crossings.push_back(Crossing::Incoming(copy.v0, stitcher->size()));
       }
 
-      Subdivide(stitcher, copy);
+      Subdivide(stitcher, copy, max_sq_error);
 
       // If vertex 1 was modified during clipping, this is an outgoing edge.
       if (copy.v1 != edge.v1) {
@@ -464,7 +464,7 @@ inline R2Shape& Orthographic::Project(absl::Nonnull<R2Shape *> out,
     }
 
     // Ensure that polygon chains are closed properly if need be.
-    if (shape.dimension() == 2) {
+    if (is_polygon) {
       if (stitcher->size() > start && (*stitcher)[start] == stitcher->back()) {
         stitcher->pop_back();
         stitcher->Connect(stitcher->size()-1, start);
@@ -479,8 +479,7 @@ inline R2Shape& Orthographic::Project(absl::Nonnull<R2Shape *> out,
   // If the shape isn't a polygon we don't need to close chains.
   if (!is_polygon) {
     if (!stitcher->EmitChains(AddChain)) {
-      stitcher->EmitChains([](auto) {});
-      stitcher->set_debug(false);
+      fprintf(stderr, "[Orthographic] Detected infinite loop splicing chains!\n");
     }
   }
 
@@ -508,40 +507,73 @@ inline R2Shape& Orthographic::Project(absl::Nonnull<R2Shape *> out,
         break;
       }
     }
-    DCHECK(first);
+
+    if (!first) {
+      fprintf(stderr, "[Orthographic] Got crossings but none are outgoing?\n");
+      crossings.clear();
+    }
 
     absl::c_sort(crossings, [&](const Crossing& a, const Crossing& b) {
-      // The first point comes before all others.
-      if (a.point == *first) {
-        if (b.point == *first) {
-          return a.incoming < b.incoming;
-        }
-        return true;
-      }
-
       // OrderedCCW returns true when the points are equal, and we want it to be
       // false because we want a < comparison here, not <=.  So check for equality
       // explicitly.
       if (a.point == b.point) {
-        // Sort by outgoing edges first.
-        return a.incoming < b.incoming;
+        return false;
       }
+
+      // The first point always comes first.
+      if (a.point == *first) return true;
+      if (b.point == *first) return false;
+
       return s2pred::OrderedCCW(*first, a.point, b.point, nadir());
     });
 
+    // Disqualify any crossings that are on exactly the same point.
+    const int ncrossing = crossings.size();
+
+    int ii = 0;
+    while (ii < ncrossing - 1) {
+      const S2Point& point = crossings[ii].point;
+      bool duplicate = false;
+
+      int jj = ii;
+      while (++jj < ncrossing && crossings[jj].point == point) {
+        crossings[jj].vertex = -1;
+        duplicate = true;
+      }
+
+      if (duplicate) {
+        crossings[ii].vertex = -1;
+      }
+
+      ii = jj;
+    }
+
+    for (const Crossing& crossing : crossings) {
+      fprintf(stderr, "crossing %d (%.18f %.18f %.18f) - %s\n",
+        crossing.vertex,
+        crossing.point.x(), crossing.point.y(), crossing.point.z(),
+        crossing.incoming ? "incoming" : "outgoing");
+    }
+
     // Now stitch crossings together.
     for (int ii = 0, N = crossings.size(); ii < N; ++ii) {
-      DCHECK_NE(crossings[ii].vertex, -1);
-
       // Skip to an outgoing crossing.
       const Crossing& outgoing = crossings[ii];
-      if (outgoing.incoming) {
+      if (crossings[ii].vertex < 0 || outgoing.incoming) {
         continue;
       }
 
-      // The next crossing -should- be an incoming crossing topologically.
-      const Crossing& incoming = crossings[(ii + 1) % N];
-      DCHECK(incoming.incoming);
+      // Find the next incoming crossing.  Since vertices can land on the same
+      // point, it may not necessarily be the next vertex, but should exist.
+      int jj = (ii + 1) % N;
+      for (; jj != ii; jj = (jj + 1) % N) {
+        if (crossings[jj].vertex >= 0 && crossings[jj].incoming) {
+          break;
+        }
+      }
+      DCHECK_NE(ii, jj);
+      const Crossing& incoming = crossings[jj];
 
       // Subdivide the stitch since it's a geodesic edge.
       const int beg = stitcher->size();
@@ -563,7 +595,7 @@ inline R2Shape& Orthographic::Project(absl::Nonnull<R2Shape *> out,
   }
 
   if (!stitcher->EmitChains(AddChain)) {
-    stitcher->EmitChains([](auto) {});
+    fprintf(stderr, "[Orthographic] Detected infinite loop splicing chains!\n");
   }
 
   return *out;
