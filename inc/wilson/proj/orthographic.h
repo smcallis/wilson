@@ -549,13 +549,6 @@ inline R2Shape& Orthographic::Project(absl::Nonnull<R2Shape *> out,
       ii = jj;
     }
 
-    for (const Crossing& crossing : crossings) {
-      fprintf(stderr, "crossing %d (%.18f %.18f %.18f) - %s\n",
-        crossing.vertex,
-        crossing.point.x(), crossing.point.y(), crossing.point.z(),
-        crossing.incoming ? "incoming" : "outgoing");
-    }
-
     // Now stitch crossings together.
     for (int ii = 0, N = crossings.size(); ii < N; ++ii) {
       // Skip to an outgoing crossing.

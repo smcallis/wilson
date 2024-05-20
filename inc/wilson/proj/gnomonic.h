@@ -585,26 +585,49 @@ void Gnomonic::subdivide(
 inline R2Shape& Gnomonic::Project(absl::Nonnull<R2Shape *> out,
   absl::Nonnull<ChainStitcher*> stitcher, const S2Shape& shape, double max_sq_error, ContainsPointFn contains) const {
 
+  const bool is_polygon = (shape.dimension() == 2);
+
   CrossingVector crossings;
   stitcher->Clear();
 
-  // If an edge is too long (close to 180 degrees), it's possible that we'll
-  // flip and close it the wrong way around the sphere.  Check if the edge is
-  // too long and sub-sample it before subdivision.
-  const auto SampleAndSubdivide = [&](const S2Shape::Edge& edge) {
-    const double angle = edge.v0.Angle(edge.v1);
-    if (angle >= 0.95*M_PI) {
-      const S2Point u = edge.v0;
-      const S2Point v = nadir().CrossProd(u);
+  const auto StitchAlongOutline = [&](const S2Point& a, const S2Point& b,
+                                      bool large_arc = false) {
+    // Project points into screen space.
+    R2Point cc = Project(nadir()); // Center of the circle.
+    R2Point p0 = Project(a)-cc;
+    R2Point p1 = Project(b)-cc;
 
-      const S2Point a = edge.v0;
-      const S2Point b = u*std::cos(angle/2) + v*std::sin(angle/2);
-      const S2Point c = edge.v1;
+    // Angle between a and b.
+    double sweep = std::acos(std::min(1.0, std::max(-1.0, p0.DotProd(p1)/(p0.Norm()*p1.Norm()))));
 
-      Subdivide(stitcher, {a, b}, max_sq_error);
-      Subdivide(stitcher, {b, c}, max_sq_error);
-    } else {
-      Subdivide(stitcher, {edge.v0, edge.v1}, max_sq_error);
+    // Find the oriented angle between the vertices around the nadir() vector.
+    // If their cross product is oriented opposite the nadir() vector, then we
+    // have to go the long way around the circle.
+    const S2Point xab = a.CrossProd(b);
+    if (large_arc || xab.DotProd(nadir()) < 0) {
+      sweep = 2*M_PI - sweep;
+    }
+
+    // The sagitta of a chord subtending an angle theta is
+    //    h = r*(1-cos(θ/2))
+    //
+    // So we can solve for theta given a desired sagitta:
+    //    θ = 2*std::acos(1-h/r)
+    //
+    // We'll require the height be equal to the max error.
+    const double r = p0.Norm();
+    const double h = std::sqrt(max_sq_error);
+
+    // Divide the total sweep by the required step to get total steps.
+    const int nsteps = std::ceil(std::fabs(sweep)/(2*std::acos(1-h/r))) + 2;
+
+    // Generate points along the outline.  Note that we have to take the
+    // negative of the accumulated angle to sweep CCW in screen space.
+    const double beg = std::atan2(p0.y(), p0.x());
+    const double step = sweep/(nsteps-1);
+    for (int i = 0; i < nsteps; ++i) {
+      const R2Point pnt(std::cos(beg - i*step), std::sin(beg - i*step));
+      stitcher->Append(cc + r*pnt);
     }
   };
 
@@ -615,19 +638,21 @@ inline R2Shape& Gnomonic::Project(absl::Nonnull<R2Shape *> out,
     int start = stitcher->size();
     for (int i = 0, n = shape.chain(chain).length; i < n; ++i) {
       const S2Shape::Edge& edge = shape.chain_edge(chain, i);
+
+      // If the edge is entirely clipped away, ignore it.
       S2Shape::Edge copy = edge;
       if (!clip_plane_.ClipEdgeOnSphere(copy)) {
         continue;
       }
 
-      // Next vertex is an incoming crossing.
+      // If vertex 0 was modified during clipping, this is an incoming edge.
       if (copy.v0 != edge.v0) {
         crossings.push_back(Crossing::Incoming(copy.v0, stitcher->size()));
       }
 
       Subdivide(stitcher, copy, max_sq_error);
 
-      // Last vertex is an outgoing crossing.
+      // If vertex 1 was modified during clipping, this is an outgoing edge.
       if (copy.v1 != edge.v1) {
         crossings.push_back(Crossing::Outgoing(copy.v1, stitcher->size() - 1));
         stitcher->Break();
@@ -635,7 +660,7 @@ inline R2Shape& Gnomonic::Project(absl::Nonnull<R2Shape *> out,
     }
 
     // Ensure that polygon chains are closed properly if need be.
-    if (shape.dimension() == 2) {
+    if (is_polygon) {
       if (stitcher->size() > start && (*stitcher)[start] == stitcher->back()) {
         stitcher->pop_back();
         stitcher->Connect(stitcher->size()-1, start);
@@ -643,12 +668,49 @@ inline R2Shape& Gnomonic::Project(absl::Nonnull<R2Shape *> out,
     }
   }
 
-  if (!crossings.empty()) {
-    const S2Point first = crossings[0].point;
+  if (crossings.empty()) {
+    // If there's no crossings, the polygon either entirely includes the edge
+    // of the projection or entirely doesn't.  Test one point on it for
+    // containment to break the tie.
+    S2Point test_point = clip_plane_.origin() + cos_angle_*nadir().Ortho();
+    if (contains(test_point)) {
+      stitcher->Break();
+      const int beg = stitcher->size();
+      StitchAlongOutline(test_point, test_point, true);
 
-    // Sort crossings CCW around the projection boundary.
+      stitcher->pop_back();
+      stitcher->Connect(stitcher->size() - 1, beg);
+      stitcher->Break();
+    }
+  } else {
+    // Sort crossings CCW around the projection boundary.  We want to start
+    // from an outgoing crossing, so sort relative to the first one.
+    std::optional<S2Point> first;
+    for (const Crossing& crossing : crossings) {
+      if (!crossing.incoming) {
+        first = crossing.point;
+        break;
+      }
+    }
+
+    if (!first) {
+      fprintf(stderr, "[Orthographic] Got crossings but none are outgoing?\n");
+      crossings.clear();
+    }
+
     absl::c_sort(crossings, [&](const Crossing& a, const Crossing& b) {
-      return !s2pred::OrderedCCW(b.point, a.point, first, nadir());
+      // OrderedCCW returns true when the points are equal, and we want it to be
+      // false because we want a < comparison here, not <=.  So check for equality
+      // explicitly.
+      if (a.point == b.point) {
+        return false;
+      }
+
+      // The first point always comes first.
+      if (a.point == *first) return true;
+      if (b.point == *first) return false;
+
+      return s2pred::OrderedCCW(*first, a.point, b.point, nadir());
     });
 
     // Now stitch crossings together.
@@ -672,20 +734,27 @@ inline R2Shape& Gnomonic::Project(absl::Nonnull<R2Shape *> out,
       DCHECK_NE(ii, jj);
       const Crossing& incoming = crossings[jj];
 
-      // Subdivide the stitch since it's a geodesic edge.
+      // Stitch around the projection boundary between the crossings.
       const int beg = stitcher->size();
       stitcher->Break();
-      SampleAndSubdivide({outgoing.point, incoming.point});
-      const int end = stitcher->size();
+      stitcher->SkipNext(); // Don't repeat the outgoing point.
+      StitchAlongOutline(outgoing.point, incoming.point);
+
+      // Don't repeat the incoming point.
+      stitcher->pop_back();
 
       // And splice the subdivided edge into the loop.
-      stitcher->Connect(outgoing.vertex, beg);
-      stitcher->Connect(end - 1, incoming.vertex);
+      if (stitcher->size() - beg == 0) {
+        stitcher->Connect(outgoing.vertex, incoming.vertex);
+      } else {
+        stitcher->Connect(outgoing.vertex, beg);
+        stitcher->Connect(stitcher->size() - 1, incoming.vertex);
+      }
     }
   }
 
   const auto AddChain = [&](absl::Span<const R2Point> vertices) {
-    out->AddChain(vertices, shape.dimension() == 2);
+    out->AddChain(vertices, is_polygon);
   };
 
   if (!stitcher->EmitChains(AddChain)) {
