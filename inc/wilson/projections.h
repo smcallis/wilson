@@ -52,9 +52,9 @@ struct ProjectionInfo {
 // Configure projections here.
 static const ProjectionInfo kProjectionList[] = {
   ProjectionInfo::Create<Cubic>("Cubic", false),
+  ProjectionInfo::Create<Equirectangular>("Equirectangular", false),
   ProjectionInfo::Create<Gnomonic>("Gnomonic", false),
-  ProjectionInfo::Create<Orthographic>("Orthographic", false),
-  ProjectionInfo::Create<Equirectangular>("Plate-Carree", true)
+  ProjectionInfo::Create<Orthographic>("Orthographic", false)
 };
 
 // Calls a function with each configured projection's ProjectionInfo entry.
