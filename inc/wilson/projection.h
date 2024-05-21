@@ -38,6 +38,7 @@
 #include "wilson/r2shape.h"
 #include "wilson/region.h"
 #include "wilson/transform.h"
+#include "wilson/projector.h"
 
 namespace w {
 
@@ -144,10 +145,10 @@ namespace w {
 //
 
 // Builds a function that takes an S2Point and returns whether a particular
-// shape in an S2ShapeIndex contains it.  The input index must live at least as
-// long as the returned function.
+// shape in an S2ShapeIndex contains it.  The input index must live at least
+// as long as the returned function.
 static inline absl::AnyInvocable<bool(const S2Point&)> IndexedContains(
-    const S2ShapeIndex& index, int shape_id) {
+  const S2ShapeIndex& index, int shape_id) {
   const S2Shape& shape = *index.shape(shape_id);
   S2ContainsPointQuery<S2ShapeIndex> query(&index);
 
@@ -163,11 +164,6 @@ public:
 
   // Returns true if a shape contains a given point, false otherwise.
   using ContainsPointFn = absl::AnyInvocable<bool(const S2Point&)>;
-
-  // Default containment function that always returns false.
-  static bool DefaultContainsFn(const S2Point&) {
-    return false;
-  }
 
   // A simple struct to store scale and rotation values for the projection.
   struct Transform {
@@ -202,6 +198,7 @@ public:
   };
 
   using EdgeList = absl::InlinedVector<S2Shape::Edge, 2>;
+  using EdgeVisitorFn = absl::FunctionRef<void(const R2Shape&)>;
 
   virtual ~IProjection() = default;
 
@@ -209,63 +206,67 @@ public:
   virtual void Resize(int width, int height) = 0;
 
   // Returns the current width of screen space.
-  virtual double width()  const = 0;
+  virtual double Width() const = 0;
 
   // Returns the current height of screen space.
-  virtual double height() const = 0;
+  virtual double Height() const = 0;
 
   // Returns a 2D region representing screen space.
-  virtual region2 screen() const = 0;
-
+  virtual region2 Screen() const = 0;
 
   // Returns an S2Cap covering the viewport.  This is a coarse covering but
   // generally much faster than getting a full viewport covering via Viewport().
   virtual S2Cap Viewcap() const = 0;
 
-
-  // Returns a S2CellUnion cell covering for the visible region of the sphere.
+  // Returns an S2CellUnion cell covering for the visible region of the sphere.
   const S2CellUnion& Viewport() const;
 
+  // Returns the scale factor between unit and screen space.  Any unit vector in
+  // unit space will have this length in screen space.
+  virtual double UnitScale() const = 0;
 
-  // Returns a scale factor between unit and screen space.
+  // Sets the maximum squared error (in pixels) for edge tessellation.
   //
-  // Any unit vector in unit space will have this length in screen space.
-  virtual double unit_scale() const = 0;
+  // Defaults to kDefaultProjectionErrorSq.
+  void SetMaxSqError(double error) {
+    max_sq_error_ = error;
+  }
 
+  // Returns the maximum squared error (in pixels) for edge tessellation.
+  double MaxSqError() const { return max_sq_error_; }
 
-  // Returns the un-rotated image of the point (1, 0, 0).  This is the center
-  // point of the projection on the unit sphere.  It will always be mapped to
-  // (0, 0) in unit space.
-  S2Point nadir() const {
+  // Returns the un-rotated image of the point (1, 0, 0).
+
+  // This point is the center of the projection of the unit sphere and will
+  // always be mapped to (0, 0) in unit space.
+  S2Point Nadir() const {
     return nadir_;
   }
 
-
   // Sets the rotation to apply to points before projection.  This has the
   // effect of moving the nadir() point.
-  void set_rotation(const Quaternion& q) {
-    set_transform(Transform(transform_.scale(), q));
+  void SetRotation(const Quaternion& q) {
+    SetTransform({transform_.scale(), q});
   }
 
-  // Returns the current rotation.
-  Quaternion rotation() const { return transform_.rotation(); }
-
+  // Returns a quaternion representing the current rotation.
+  Quaternion Rotation() const {
+    return transform_.rotation();
+  }
 
   // Sets the scale factor to apply when projecting points.  This has the effect
   // of 'zooming' around the nadir() point.
-  void set_scale(double scale) {
-    set_transform(Transform(scale, transform_.rotation()));
+  void SetScale(double scale) {
+    SetTransform(Transform(scale, transform_.rotation()));
   }
 
   // Returns the current scale factor.
-  double scale() const { return transform_.scale(); }
-
+  double Scale() const { return transform_.scale(); }
 
   // Pushes the current transform onto a stack; must pair with PopTransform().
   void PushTransform() {
     transforms_.emplace_back(transform_);
   }
-
 
   // Pops a transform off of the stack, restoring the projection state.
   bool PopTransform() {
@@ -273,28 +274,23 @@ public:
       return false;
     }
 
-    set_transform(transforms_.back());
+    SetTransform(transforms_.back());
     transforms_.pop_back();
     return true;
   }
 
+  // Rotates a point using the current Rotation().
+  S2Point Rotate(const S2Point& point) const {
+    return transform_.RotateFwd(point);
+  }
 
-  // An optional transformation to make to the geometry before rotation.
-  virtual S2Point BeforeRotate(S2Point point) const = 0;
-
-  // Rotate or unrotate a point using the current rotation().  These are meant
-  // to be inverses i.e.
-  //
-  //       Rotate(Unrotate(point)) == point
-  //   and Unrotate(Rotate(point)) == point
-  //
-  // Though slight numerical error might make the results slightly non-equal.
-  S2Point Rotate(S2Point point) const { return transform_.RotateFwd(point); }
-  S2Point Unrotate(S2Point point) const { return transform_.RotateInv(point); }
-
+  // Rotates a point using the inverse of the current Rotation().
+  S2Point Unrotate(const S2Point& point) const {
+    return transform_.RotateInv(point);
+  }
 
   // Converts a point from world space to unit space.
-  virtual R2Point WorldToUnit(S2Point) const = 0;
+  virtual R2Point WorldToUnit(const S2Point& point) const = 0;
 
   // Converts a point from unit space back to world space.  If the inverse
   // projection of the point hits the unit sphere, then that point is returned.
@@ -302,158 +298,108 @@ public:
   // Otherwise, if 'nearest' is true, then the point is project onto the closest
   // visible point on the unit sphere.
   virtual bool UnitToWorld( //
-    absl::Nonnull<S2Point *> out, R2Point point, bool nearest) const = 0;
+    absl::Nonnull<S2Point*> out, const R2Point& point, bool nearest) const = 0;
 
-  // Converts a point between unit and screen space.
-  virtual R2Point UnitToScreen(R2Point) const = 0;
-  virtual R2Point ScreenToUnit(R2Point) const = 0;
+  // Converts a point from unit space to screen space.
+  virtual R2Point UnitToScreen(const R2Point& point) const = 0;
 
+  // Converts a point from screen space to unit space.
+  virtual R2Point ScreenToUnit(const R2Point&) const = 0;
 
-  // Clears a provided R2Shape and fills it with the outline of the projected
-  // unit sphere in screen space.
+  // Appends an outline for the projection in screen space to the given sink.
   //
-  // Returns a reference to the passed R2Shape.
-  virtual R2Shape& MakeOutline(absl::Nonnull<R2Shape*> out) const = 0;
+  // Does not clear the sink before appending.  The resulting outline is
+  // suitable for filling with a background color for the projection as a whole.
+  virtual void MakeOutline(absl::Nonnull<ChainSink*> out) const = 0;
 
-
-  // Clears a provided R2Shape and fills it with a graticule showing lines of
-  // latitude and longitude.
+  // Appends a graticule showing lines of latitude and longitude to a sink.
   //
-  // Returns a reference to the passed R2Shape.
-  virtual R2Shape& MakeGraticule(absl::Nonnull<R2Shape*> out) const = 0;
-
+  // Does not clear the sink before appending.
+  virtual void MakeGraticule(absl::Nonnull<ChainSink*> out) const = 0;
 
   // Projects a point from world space to screen space.
   //
-  // Does not distinguish between visible and non-visible points.  Geometry
-  // should be Clip()-ed to the projection boundary to ensure only visible
-  // points are projected.
-  virtual R2Point Project(S2Point) const = 0;
-
-
-  // Projects an entire S2Shape into screen space, returning a polygon with its
-  // edges clipped, stitched and subdivided as needed.
-  //
-  // When clipping polygons, a callback must be provided that can be used to
-  // test whether a single point is contained in the polygon.  The default
-  // always returns false and is suitable for points and polylines.
-  //
-  // Implementations must maintain polygon closure when interiors are clipped
-  // across projection boundaries by Stitch()-ing edges that cross the boundary
-  // together.
-  //
-  // max_sq_error is the maximum -squared- error between the true projection of
-  // the shape's edges and the edges in screen space, in pixels.
-  //
-  // The projected geometry is appended to the provided R2Shape.
-  //
-  // Returns a reference to the passed R2Shape.
-  virtual R2Shape& Project(absl::Nonnull<R2Shape *> out,  //
-    absl::Nonnull<ChainStitcher*>, const S2Shape& shape, double max_sq_error, ContainsPointFn contains = DefaultContainsFn) const = 0;
-
-
-  // Projects an S2Cap into screen space, returning a polygon with its edges
-  // clipped, stitched and subdivided as needed.
-  //
-  // max_sq_error is the maximum -squared- error between the true projection of
-  // the shape's edges and the edges in screen space, in pixels.
-  //
-  // The projected geometry is appended to the provided R2Shape, and a
-  // ChainStitcher must be provided to use if geometry has to be cut.
-  //
-  // Returns a reference to the passed R2Shape.
-  virtual R2Shape& Project(absl::Nonnull<R2Shape *> out,  //
-    absl::Nonnull<ChainStitcher*>, const S2Cap& cap, double max_sq_error) const = 0;
-
+  // Returns true if the point is visible on screen, false otherwise.
+  virtual bool Project(absl::Nonnull<R2Point*> out, const S2Point&) const = 0;
 
   // Transforms a point from screen space back to world space, if possible.
   //
   // If unprojecting the point onto the unit sphere is possible, then the
-  // unprojected point is returned.
-  //
-  // Otherwise, if 'nearest' is true, stores the nearest visible point on the
-  // sphere and returns true.
+  // unprojected point stored in out.  If the point can't be unprojected but
+  // 'nearest' is true, then the nearest visible point is stored and true
+  // returned.
   //
   // Otherwise, returns false.
-  virtual bool Unproject(absl::Nonnull<S2Point *> out,  //
-    R2Point point, bool nearest) const = 0;
+  virtual bool Unproject(  //
+    absl::Nonnull<S2Point *> out, const R2Point& point, bool nearest) const = 0;
 
-
-  // Clips a single S2Point to the visible portion of the sphere.  Returns true
-  // if the point is visible and false otherwise.
-  virtual bool Clip(S2Point) const = 0;
-
-
-  // Clips an S2Shape edge to the visible portion of the sphere.  If need be,
-  // the edge is broken into multiple disconnected parts and added to the given
-  // vector.
+  // Projects an edge from world space to screen space.  The edge is subdivided,
+  // respecting the current MaxSqError() and appended to the given ChainSink.
   //
-  // Returns a reference to the passed EdgeList.
-  virtual EdgeList& Clip(absl::Nonnull<EdgeList *> edges,  //
-    const S2Shape::Edge& edge) const = 0;
+  // Does not clear the sink before appending.  May add breaks to the ChainSink.
+  virtual void Project( //
+    absl::Nonnull<ChainSink*> out, const S2Shape::Edge& edge) const = 0;
 
+  // Projects a shape of 0 or 1 dimensions into screen space.  Any edges are
+  // subdivided, honoring the current MaxSqError(), and appended to the given
+  // ChainSink.
+  //
+  // Does not clear the sink before appending.  May add breaks to the ChainSink.
+  virtual void Project(  //
+    absl::Nonnull<ChainSink*> out, const S2Shape& shape) const = 0;
 
-  // Takes an edge and vertex that are presumed to have been clipped via Clip(),
-  // converts them into screen space and connects edge.v1 to v0 with a series of
-  // lines along the projection boundary.
+  // Projects a polygon into screen space.  0 and 1 dimensional shapes should
+  // call Project() above.  Any edges are subdivided, honoring the current
+  // MaxSqError(), and appended to the given ChainSink.
   //
-  // v0 isn't added to the path so that this function may be used to stitch
-  // together a chain of edges during projection.
+  // A ChainStitcher instance must be provided to be used to stitch polygon
+  // chains together.
   //
-  // The stitched geometry is appended to the provided R2Shape.
+  // When clipping polygons, a callback must be provided that can be used to
+  // test whether a single point is contained in the polygon.  For shapes that
+  // are indexed, IndexedContains() will automatically generate a suitable
+  // function for a given shape.
   //
-  // Returns a reference to the passed R2Shape.
-  virtual void Stitch(absl::Nonnull<R2Shape *> out,  //
-    const S2Shape::Edge& edge, const S2Point& v0) const = 0;
+  // Does not clear the sink before appending.  May add breaks to the ChainSink.
+  virtual void Project(  //
+      absl::Nonnull<ChainSink*> out, absl::Nonnull<ChainStitcher*> stitcher,
+      const S2Shape&, ContainsPointFn contains) const = 0;
 
-
-  // Takes an S2Shape::Edge, and subdivides it as needed to achieve a maximum
-  // error in post-projection distortion due to edge curvature.
+  // Projects an S2Cap into screen space.  The cap is subdivided, honoring the
+  // current MaxSqError() and the resulting points are appended to the given
+  // ChainSink.
   //
-  // The edge is assumed to have been generated by Clip().  The edge is then
-  // recursively subdivided Norm2() distance from the actual edge in screen
-  // space is less than max_sq_error, storing projected points into the output
-  // as it goes.
+  // A ChainStitcher instance must be provided to be used to stitch polygon
+  // chains together.
   //
-  // This function is intended to be used to subdivide chains of edges.  So the
-  // first vertex of the edge is only added when the current chain is empty.a
-  //
-  // max_sq_error is the maximum -squared- error between the true projection of
-  // the shape's edges and the edges in screen space, in pixels-squared.
-  virtual void Subdivide(absl::Nonnull<ChainSink*> out,
-    const S2Shape::Edge&, double max_sq_error) const = 0;
+  // Does not clear the sink before appending.  May add breaks to the ChainSink.
+  virtual void Project(  //
+      absl::Nonnull<ChainSink*> out, absl::Nonnull<ChainStitcher*> stitcher,
+      const S2Cap& cap) const = 0;
 
+  // --------------------------------------------------------------------------
+  // Overloads using default values.
+  // We can't use default parameters with virtual methods.
+  // --------------------------------------------------------------------------
 
-  // Overloads that provide default values for parameters.  We can't use default
-  // parameters with virtual methods so we provide these instead.
-  bool UnitToWorld(absl::Nonnull<S2Point *> out, R2Point point) const {
+  bool UnitToWorld(absl::Nonnull<S2Point*> out, const R2Point& point) const {
     return UnitToWorld(out, point, false);
   }
 
-  R2Shape& Project(absl::Nonnull<R2Shape *> out, absl::Nonnull<ChainStitcher*> stitcher, const S2Shape &shape, ContainsPointFn contains = DefaultContainsFn) const {
-    return Project(out, stitcher, shape, kDefaultProjectionErrorSq, std::move(contains));
-  }
-
-  R2Shape& Project(absl::Nonnull<R2Shape *> out, absl::Nonnull<ChainStitcher*> stitcher, const S2Cap &cap) const {
-    return Project(out, stitcher, cap, kDefaultProjectionErrorSq);
-  }
-
-  bool Unproject(absl::Nonnull<S2Point *> out, R2Point point) const {
+  bool Unproject(absl::Nonnull<S2Point*> out, const R2Point& point) const {
     return Unproject(out, point, false);
-  }
-
-  void Subdivide(  //
-    absl::Nonnull<ChainSink*> out, const S2Shape::Edge& edge) const {
-    Subdivide(out, edge, kDefaultProjectionErrorSq);
   }
 
 protected:
   // Called on changes to scale, size, and rotation.
   virtual void UpdateTransforms() {}
 
+  // An optional transformation to make to the geometry before rotation.
+  virtual S2Point PreRotate(S2Point point) const = 0;
+
 private:
   // Sets the current transform for the projection.
-  void set_transform(Transform transform) {
+  void SetTransform(Transform transform) {
     transform_ = std::move(transform);
     nadir_ = transform_.RotateInv(S2Point(1,0,0));
 
@@ -472,9 +418,13 @@ private:
   Transform transform_ = {Transform(1/1.1, {})};
 
   // The center point of the projection.
-  S2Point nadir_ = S2Point(1,0,0);
+  S2Point nadir_ = S2Point(1, 0, 0);
 
-  // Current viewport cell union and a mutex so we can generate it lazily.
+  // Maximum squared error (in pixels) when tessellating edges.
+  double max_sq_error_ = kDefaultProjectionErrorSq;
+
+  // A cell covering for the viewport, guarded by a mutex so that we can
+  // generate it on-demand.
   mutable absl::Mutex viewport_lock_;
   mutable bool viewport_dirty_ = true; ABSL_GUARDED_BY(viewport_lock_);
   mutable S2CellUnion viewport_ ABSL_GUARDED_BY(viewport_lock_);
@@ -509,32 +459,30 @@ public:
 
   // Gets and sets the dimensions of screen space.
   void    Resize(int width, int height) final;
-  double  width()  const final { return width_;  }
-  double  height() const final { return height_; }
-  region2 screen() const final {
-    return region2(0, 0, width(), height());
+  double  Width()  const final { return width_;  }
+  double  Height() const final { return height_; }
+  region2 Screen() const final {
+    return region2(0, 0, Width(), Height());
   }
 
-  double unit_scale() const final { return unit_scale_; }
-  R2Point UnitToScreen(R2Point p) const final { return unit_to_screen_*p; }
-  R2Point ScreenToUnit(R2Point p) const final { return screen_to_unit_*p; }
+  double UnitScale() const final { return unit_scale_; }
 
+  R2Point UnitToScreen(const R2Point& p) const final {
+    return unit_to_screen_ * p;
+  }
 
+  R2Point ScreenToUnit(const R2Point& p) const final {
+    return screen_to_unit_ * p;
+  }
+
+  virtual S2Point PreRotate(S2Point point) const { return point; }
   virtual S2Cap Viewcap() const override;
-  virtual S2Point BeforeRotate(S2Point point) const { return point; }
-  virtual R2Point Project(S2Point pnt) const override;
 
-  virtual R2Shape& Project(absl::Nonnull<R2Shape *> out,
-    absl::Nonnull<ChainStitcher*> stitcher, const S2Shape& shape, double max_sq_error, ContainsPointFn contains) const override;
-
-  virtual R2Shape& Project(absl::Nonnull<R2Shape *> out,
-    absl::Nonnull<ChainStitcher*> stitcher, const S2Cap& cap, double max_sq_error) const override;
+  virtual void Project(absl::Nonnull<ChainSink*> out,
+    absl::Nonnull<ChainStitcher*> stitcher, const S2Cap& cap) const override;
 
   virtual bool Unproject(
-    absl::Nonnull<S2Point *>, R2Point point, bool nearest) const override;
-
-  virtual void Subdivide(absl::Nonnull<ChainSink*> out,
-    const S2Shape::Edge&, double max_sq_error) const override;
+    absl::Nonnull<S2Point*> out, const R2Point& point, bool nearest) const override;
 
 private:
   // Cast back to the Derived class.
@@ -544,13 +492,6 @@ private:
   // Estimate the max distance of an R2 edge in screen space to a point.
   S1ChordAngle R2EdgeDistance(
     R2Point v0, R2Point v1, S2Point pnt, S1ChordAngle dist) const;
-
-  // Subdivides the given edge, provided projected endpoints are given for it.
-  //
-  // By passing the projected endpoints as parameters, we're able to eliminate
-  // the need to re-project points
-  void Subdivide(absl::Nonnull<ChainSink*> out,  //
-    S2Shape::Edge s2edge, R2Shape::Edge r2edge, double max_sq_error) const;
 
   int width_;
   int height_;
@@ -592,12 +533,12 @@ template <typename Derived>
 inline S2Cap Projection<Derived>::Viewcap() const {
   S1ChordAngle radius = S1ChordAngle::Zero();
   for (int side=0; side < 4; ++side) {
-    const R2Point v0 = screen().GetVertex(side);
-    const R2Point v1 = screen().GetVertex(side+1);
+    const R2Point v0 = Screen().GetVertex(side);
+    const R2Point v1 = Screen().GetVertex(side+1);
 
-    radius = R2EdgeDistance(v0, v1, nadir(), radius);
+    radius = R2EdgeDistance(v0, v1, Nadir(), radius);
   }
-  return S2Cap(nadir(), radius);
+  return S2Cap(Nadir(), radius);
 }
 
 
@@ -626,60 +567,9 @@ inline void Projection<Derived>::Resize(int width, int height) {
   UpdateTransforms();
 }
 
-
 template <typename Derived>
-inline void Projection<Derived>::Subdivide(absl::Nonnull<ChainSink*> out,
-  const S2Shape::Edge& edge, double max_sq_error) const {
-
-  R2Point p0 = projection().Project(edge.v0);
-  R2Point p1 = projection().Project(edge.v1);
-
-  if (out->ChainEmpty()) {
-    out->Append(p0);
-  }
-
-  if ((p1-p0).Norm2() > max_sq_error) {
-    Subdivide(out, edge, {p0, p1}, max_sq_error);
-  }
-  out->Append(p1);
-}
-
-
-template <typename Derived>
-inline void Projection<Derived>::Subdivide(absl::Nonnull<ChainSink*> out,
-  S2Shape::Edge s2edge, R2Shape::Edge r2edge, double max_sq_error) const {
-
-  // Compute a point halfway along the edge.
-  S2Point v2 = S2::Interpolate(s2edge.v0, s2edge.v1, 0.5);
-  R2Point p2 = projection().Project(v2);
-
-  // Compute the distance from the projected point to the line from p0 to p1.
-  R2Point vp = p2-r2edge.v0;
-  R2Point vn = r2edge.v1-r2edge.v0;
-  double dist2 = (vp - (vp.DotProd(vn)*vn)/vn.Norm2()).Norm2();
-
-  // If we're too far from the line, recursively subdivide the first half and
-  // the second half.
-  if (dist2 > max_sq_error) {
-    Subdivide(out, {s2edge.v0, v2}, {r2edge.v0, p2}, max_sq_error);
-    out->Append(p2);
-    Subdivide(out, {v2, s2edge.v1}, {p2, r2edge.v1}, max_sq_error);
-  }
-}
-
-
-
-template <typename Derived>
-inline R2Point Projection<Derived>::Project(S2Point pnt) const {
-  return projection().UnitToScreen(
-    projection().WorldToUnit(
-      projection().Rotate(
-        projection().BeforeRotate(pnt))));
-}
-
-
-template <typename Derived>
-bool Projection<Derived>::Unproject(absl::Nonnull<S2Point*> out, R2Point pnt, bool nearest) const {
+bool Projection<Derived>::Unproject(
+  absl::Nonnull<S2Point*> out, const R2Point& pnt, bool nearest) const {
   if (projection().UnitToWorld(out, projection().ScreenToUnit(pnt), nearest)) {
     *out = projection().Unrotate(*out);
     return true;
@@ -687,63 +577,11 @@ bool Projection<Derived>::Unproject(absl::Nonnull<S2Point*> out, R2Point pnt, bo
   return false;
 }
 
-
 template <typename Derived>
-R2Shape& Projection<Derived>::Project(absl::Nonnull<R2Shape*> out, absl::Nonnull<ChainStitcher*> stitcher, const S2Shape& shape, double max_sq_error, ContainsPointFn contains) const {
-  for (int chain_id=0; chain_id < shape.num_chains(); ++chain_id) {
-    S2Shape::Chain chain = shape.chain(chain_id);
+void Projection<Derived>::Project(absl::Nonnull<ChainSink*> out,
+  absl::Nonnull<ChainStitcher*> stitcher, const S2Cap& cap) const {
 
-    // The head of the chain and the last edge processed.
-    std::optional<S2Shape::Edge> head;
-    std::optional<S2Shape::Edge> last;
-
-    IProjection::EdgeList edges;
-    for (int i=0; i < chain.length; ++i) {
-      Clip(&edges, shape.chain_edge(chain_id, i));
-      for (const S2Shape::Edge &edge : edges) {
-        if (!head) {
-          head = edge;
-        }
-
-        // Edges should be connected if they don't cross the projection
-        // boundary.  So we should have a chain of edges something like [(v0,
-        // v1), (v1, v2), (v2, v3)] where vertices are shared with the previous
-        // and next edges.
-        //
-        // If the tail of the current chain doesn't match the start of this
-        // edge, then we must have left the projection and come back in.
-        //
-        // Stitch around the boundary between the vertices to close it.
-        if (last && last->v1 != edge.v0) {
-          Stitch(out, *last, edge.v0);
-        }
-
-        Subdivide(out, edge, max_sq_error);
-        last = edge;
-      }
-    }
-
-    if (head) {
-      // If we didn't land back on the first vertex after going around the
-      // chain, it's because we went over the clip edge, stitch a path between
-      // them to close the polygon.
-      if (last->v1 != head->v0) {
-        Stitch(out, *last, head->v0);
-      } else {
-        out->Append(Project(last->v1));
-      }
-    }
-
-    out->EndChain();
-  }
-
-  return *out;
-}
-
-
-template <typename Derived>
-R2Shape& Projection<Derived>::Project(
-  absl::Nonnull<R2Shape*> out, absl::Nonnull<ChainStitcher*> stitcher, const S2Cap& cap, double max_sq_error) const {
+  ABSL_UNREACHABLE();
 
   // Find the center point of the cap and UV vectors forming a basis for points
   // along the cap boundary.
@@ -772,7 +610,11 @@ R2Shape& Projection<Derived>::Project(
 
     // When we project the two different mid points, recurse if they're too far
     // apart in screen space.
-    if ((Project(pmid)-Project(interp)).Norm2() > max_sq_error) {
+    R2Point proj0, proj1;
+    Project(&proj0, pmid);
+    Project(&proj1, interp);
+
+    if ((proj0-proj1).Norm2() > MaxSqError()) {
       self(a0, p0, amid, pmid, self);
       self(amid, pmid, a1, p1, self);
     } else {
@@ -788,8 +630,7 @@ R2Shape& Projection<Derived>::Project(
   }
   points.emplace_back(CapPoint(0));
 
-  // Now project the S2Shape into screen space wholesale.
-  return Project(out, stitcher, S2LaxPolylineShape(points));
+  Project(out, stitcher, S2LaxPolylineShape(points), [](const S2Point& pnt) { return false; });
 }
 
 

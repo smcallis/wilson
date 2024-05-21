@@ -28,25 +28,19 @@ namespace w {
 // boundaries.
 //
 // Any existing path information is cleared.
-inline void S2Graticule(absl::Nonnull<R2Shape *> out, const IProjection &proj,
-                        int level) {
-  // Clip edges to the spherical cap bounding the viewport first thing.  This
-  // well prevent us from trying to subdivide parts of edges that aren't even
-  // visible.
+inline void S2Graticule(
+  absl::Nonnull<R2Shape *> out, const IProjection &proj, int level) {
+  // Clip edges to the spherical cap bounding the viewport.  This will prevent
+  // us from trying to subdivide parts of edges that aren't visible.
   S2Cap cap = proj.Viewcap();
   Plane clip {cap.center(), (1-cap.height())*cap.center()};
   bool clip_cap = cap.radius() < S1ChordAngle::Right();
 
-  IProjection::EdgeList edges;
-
   // Projects and subdivides an S2Shape edge and appends it to the path.
   const auto AppendEdgeToShape = [&](S2Shape::Edge edge) {
     if (!clip_cap || clip.ClipEdgeOnSphere(edge)) {
-      proj.Clip(&edges, edge);
-      for (const S2Shape::Edge& edge : edges) {
-        proj.Subdivide(out, edge, IProjection::kDefaultProjectionErrorSq);
-        out->EndChain();
-      }
+      proj.Project(out, edge);
+      out->Break();
     }
   };
 

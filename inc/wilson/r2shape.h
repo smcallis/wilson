@@ -74,8 +74,19 @@ struct R2Shape : public ChainSink {
 
   // Starts a new chain.  If the current chain is empty, does nothing.
   void Break() override {
-    active_chain_ = chains_.size();
-    chains_.emplace_back(path_.size());
+    if (active_chain_ >= 0) {
+      active_chain_ = -1;
+    }
+  }
+
+  // Closes and ends the current chain.  The next command will start a new one.
+  void Close() override {
+    if (active_chain_ >= 0) {
+      path_.lineTo(path_.vertexData()[chains_.back()]);
+      path_.close();
+      active_chain_ = -1;
+      Break();
+    }
   }
 
   // Appends a single point to the current chain.
@@ -94,6 +105,10 @@ struct R2Shape : public ChainSink {
     }
   }
 
+  ssize_t Size() const override {
+    return path_.size();
+  }
+
   // Returns the size of the current chain.
   ssize_t ChainSize() const override {
     if (active_chain_ < 0 || chains_.empty()) {
@@ -104,25 +119,24 @@ struct R2Shape : public ChainSink {
 
   // Appends all the chains of a shape.
   void Append(const R2Shape& shape) {
-    EndChain();
+    Break();
     for (int i=0; i < shape.nchains(); ++i) {
       Append(shape.chain_vertices(i));
-      EndChain();
+      Break();
     }
   }
 
   // Similar to Append, but always adds the span of points as a separate chain.
   void AddChain(absl::Span<const R2Point> points, bool close) {
-    EndChain();
+    Break();
     for (const auto& pnt : points) {
       Append(pnt);
     }
 
     if (close) {
-      CloseChain();
+      Close();
     } else {
-
-      EndChain();
+      Break();
     }
   }
 
@@ -146,7 +160,7 @@ struct R2Shape : public ChainSink {
     // enough to matter during a single rotation around the circle.
     int steps = std::ceil(2*M_PI/theta);
 
-    EndChain();
+    Break();
     R2Point pnt = {radius,0};
     for (int i=0; i <= steps; ++i) {
       Append(pnt + center);
@@ -155,7 +169,7 @@ struct R2Shape : public ChainSink {
         pnt.x()*s + pnt.y()*c
       };
     }
-    EndChain();
+    Break();
   }
 
   // Return a reference to the underlying path object.
@@ -163,27 +177,6 @@ struct R2Shape : public ChainSink {
   const R2Point* data() const { return
       // Both R2Point and BLPoint are a struct of two double fields.
       reinterpret_cast<const R2Point*>(path_.vertexData());
-  }
-
-  // Closes and ends the current chain.  The next command will start a new one.
-  void CloseChain() {
-    if (active_chain_ >= 0) {
-      path_.lineTo(path_.vertexData()[chains_.back()]);
-      path_.close();
-      active_chain_ = -1;
-    }
-  }
-
-  // Ends the current chain.  The next command will start a new one.
-  void EndChain() {
-    if (active_chain_ >= 0) {
-      active_chain_ = -1;
-    }
-  }
-
-  // Returns true if there are no vertices.
-  bool empty() const {
-    return path_.empty();
   }
 
   // Returns the size of the path in vertices.
@@ -240,7 +233,8 @@ private:
   // then degrades into a noop.
   bool MaybeStartChain() {
     if (active_chain_ < 0) {
-      Break();
+      active_chain_ = chains_.size();
+      chains_.emplace_back(path_.size());
       return true;
     }
     return false;

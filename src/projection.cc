@@ -44,7 +44,7 @@ public:
 
   // Returns true if the given cell probably intersects the viewport.
   bool MayIntersect(const S2Cell& cell) const override {
-    const region2 screen = projection_->screen();
+    const region2 screen = projection_->Screen();
 
     // If the cell doesn't even intersect our cap bound then no intersection.
     if (!GetCapBound().MayIntersect(cell)) {
@@ -53,7 +53,8 @@ public:
 
     // If any cell vertices land inside the screen then they intersect.
     for (int ii=0; ii < 4; ++ii) {
-      R2Point pnt = projection_->Project(cell.GetVertex(ii));
+      R2Point pnt;
+      projection_->Project(&pnt, cell.GetVertex(ii));
       if (screen.contains(pnt)) {
         return true;
       }
@@ -75,28 +76,28 @@ public:
     // look for an edge that crosses.
     constexpr static double kPixelTolerance = 4;
 
-    IProjection::EdgeList edges;
-    R2Shape r2shape;
-    for (int ii=0; ii < 4; ++ii) {
-      const S2Shape::Edge edge = {cell.GetVertex(ii), cell.GetVertex(ii+1)};
-      for (const S2Shape::Edge& edge : projection_->Clip(&edges, edge)) {
-        r2shape.Clear();
-        projection_->Subdivide(&r2shape, edge, kPixelTolerance);
+    // IProjection::EdgeList edges;
+    // R2Shape r2shape;
+    // for (int ii=0; ii < 4; ++ii) {
+    //   const S2Shape::Edge edge = {cell.GetVertex(ii), cell.GetVertex(ii+1)};
+    //   for (const S2Shape::Edge& edge : projection_->Clip(&edges, edge)) {
+    //     r2shape.Clear();
+    //     projection_->Subdivide(&r2shape, edge, kPixelTolerance);
 
-        for (int jj=0; jj < r2shape.nchains(); ++jj) {
-          for (int kk=0; kk < r2shape.chain(jj).length; ++kk) {
-            R2Shape::Edge r2edge = r2shape.chain_edge(jj, kk);
-            if (screen.contains(r2edge.v0) || screen.contains(r2edge.v0)) {
-              return true;
-            }
+    //     for (int jj=0; jj < r2shape.nchains(); ++jj) {
+    //       for (int kk=0; kk < r2shape.chain(jj).length; ++kk) {
+    //         R2Shape::Edge r2edge = r2shape.chain_edge(jj, kk);
+    //         if (screen.contains(r2edge.v0) || screen.contains(r2edge.v0)) {
+    //           return true;
+    //         }
 
-            if (EdgeIntersectsScreen(r2edge, screen)) {
-              return true;
-            }
-          }
-        }
-      }
-    }
+    //         if (EdgeIntersectsScreen(r2edge, screen)) {
+    //           return true;
+    //         }
+    //       }
+    //     }
+    //   }
+    // }
 
     // No intersection.
     return false;

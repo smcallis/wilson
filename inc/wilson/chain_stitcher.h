@@ -33,92 +33,93 @@ class ChainStitcher : public ChainSink {
  public:
   // Clears the stitch buffer for a new shape.
   void Clear() override {
-    vertices_.clear();
+    nodes_.clear();
     nexts_.clear();
     Break();
   }
 
-  // Break the current chain, the next vertex appended will be unconnected.
-  void Break() override {
-    last_ = kUnconnected;
-    chain_size_ = 0;
+  // Returns true when the stitcher is waiting to start a new chain.
+  bool Broken() const {
+    return tail_ == kUnconnected;
   }
 
-  // Skip the next appended point.
-  void SkipNext() {
-    skip_ = true;
+  // Breaks the current chain, the next vertex appended will be unconnected.
+  void Break() override {
+    tail_ = kUnconnected;
+  }
+
+  // Close the current chain, the next vertex appended will be unconnected.
+  void Close() override {
+    if (!Broken()) {
+      if (!MaybeClose()) {
+        Connect(tail_, head_);
+        Break();
+      }
+    }
+  }
+
+  // Closes the chain but only if it closed naturally (i.e. the first and last
+  // vertices were equal).  If they are, then remove the duplicate point and
+  // close the chain.  Returns true and breaks the chain if it closed naturally,
+  // otherwise returns false and leaves the chain unbroken.
+  bool MaybeClose() {
+    if (Broken()) {
+      return false;
+    }
+
+    if (tail_ > head_ && nodes_[tail_] == nodes_[head_]) {
+      pop_back();
+      Connect(tail_, head_);
+      Break();
+      return true;
+    }
+    return false;
   }
 
   // Appends a new vertex to the buffer, connecting it to the previous vertex.
   void Append(const R2Point& point) override {
-    if (skip_) {
-      skip_ = false;
-      return;
+    const int next = nodes_.size();
+
+    if (Broken()) {
+      head_ = next;  // Save start of new chain.
+    } else {
+      Connect(tail_, next);
     }
 
-    const int curr = vertices_.size();
-    vertices_.emplace_back(point);
-    ++chain_size_;
-
-    if (last_ != kUnconnected) {
-      nexts_[last_] = curr;
-    }
-
+    nodes_.emplace_back(point);
     nexts_.emplace_back(kUnconnected);
-    last_ = curr;
+    tail_ = next;
   }
 
   // Appends a span of vertices to the buffer.
   void Append(absl::Span<const R2Point> points) override {
-    int start = 0;
-    if (skip_) {
-      ++start;
-      skip_ = false;
-    }
-
-    // Append the rest of the points.
-    for (int i = start, n = points.size(); i < n; ++i) {
-      const int curr = vertices_.size();
-      vertices_.emplace_back(points[i]);
-
-      if (last_ != kUnconnected) {
-        nexts_[last_] = curr;
-      }
-
-      nexts_.emplace_back(kUnconnected);
-      last_ = curr;
-      ++chain_size_;
+    for (const R2Point& point : points) {
+      Append(point);
     }
   }
 
-  ssize_t ChainSize() const {
-    return chain_size_;
+  ssize_t Size() const override {
+    return nodes_.size();
   }
 
-  // Returns the current number of vertices appended.
-  int size() const {
-    return vertices_.size();
-  }
-
-  // Returns true if the buffer is empty.
-  bool empty() const {
-    return size() == 0;
+  ssize_t ChainSize() const override {
+    return Broken() ? 0 : Size() - head_;
   }
 
   // Returns true if we're at the start of a chain, i.e. the last vertex is the
   // unconnected vertex.
   bool start_of_chain() const {
-    return last_ == kUnconnected;
+    return tail_ == kUnconnected;
   }
 
   // Returns the last vertex appended.
-  const R2Point& back() const { return vertices_.back(); }
+  const R2Point& back() const { return nodes_.back(); }
 
   // Removes the last vertex added (if any).
   void pop_back() {
-    vertices_.pop_back();
+    nodes_.pop_back();
     nexts_.pop_back();
-    last_ = vertices_.size() - 1;
+    tail_ = nodes_.size() - 1;
   }
 
   // Make vertex B the next vertex after A.  Returns B.
@@ -129,7 +130,7 @@ class ChainStitcher : public ChainSink {
   // Emits each connected chain to the given callback.  Returns false if an
   // infinite loop is detected in the connected vertices, true otherwise.
   bool EmitChains(absl::FunctionRef<void(absl::Span<const R2Point>)> emit) {
-    const size_t total_vertices = vertices_.size();
+    const size_t total_vertices = nodes_.size();
     util::bitmap::Bitmap64 unseen(total_vertices, true);
 
     size_t start;
@@ -152,13 +153,13 @@ class ChainStitcher : public ChainSink {
             // Disjoint vertex, punt and switch to out of place mode.
             in_place = false;
             for (ssize_t ii = beg; ii < end; ++ii) {
-              scratch_.emplace_back(vertices_[ii]);
+              scratch_.emplace_back(nodes_[ii]);
             }
           }
         }
 
         if (!in_place) {
-          scratch_.emplace_back(vertices_[cur]);
+          scratch_.emplace_back(nodes_[cur]);
         }
 
         // We should emit each vertex once so if we total up to more than the
@@ -173,7 +174,7 @@ class ChainStitcher : public ChainSink {
       } while (cur != kUnconnected && cur != start);
 
       if (in_place) {
-        emit(absl::MakeSpan(&vertices_[beg], end - beg));
+        emit(absl::MakeSpan(&nodes_[beg], end - beg));
       } else {
         emit(scratch_);
       }
@@ -183,16 +184,15 @@ class ChainStitcher : public ChainSink {
   }
 
   const R2Point& operator[](int index) const {
-    return vertices_[index];
+    return nodes_[index];
   }
 
  private:
-  bool skip_ = false;
-  int chain_size_ = 0;
-  int last_ = kUnconnected;
+  int head_ = 0;
+  int tail_ = kUnconnected;
 
-  std::vector<R2Point> vertices_;
-  std::vector<int> nexts_;
+  std::vector<R2Point> nodes_;
+  std::vector<int>     nexts_;
   std::vector<R2Point> scratch_;
 };
 

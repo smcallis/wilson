@@ -50,7 +50,7 @@ static inline void Simplify(absl::Nonnull<R2Shape *> out,
                 last = i;
             }
         }
-        out->EndChain();
+        out->Break();
     }
 }
 

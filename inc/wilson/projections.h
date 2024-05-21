@@ -17,10 +17,10 @@
 #include "absl/flags/flag.h"
 #include "wilson/projection.h"
 
-#include "wilson/proj/cubic.h"
+//#include "wilson/proj/cubic.h"
 #include "wilson/proj/equirectangular.h"
-#include "wilson/proj/gnomonic.h"
-#include "wilson/proj/orthographic.h"
+// #include "wilson/proj/gnomonic.h"
+// #include "wilson/proj/orthographic.h"
 
 ABSL_FLAG(bool, experimental_projections, false, "Enable experimental projections");
 
@@ -36,8 +36,8 @@ struct ProjectionInfo {
 
     const auto Factory = [](Quaternion rotation, double scale) {
       auto projection = std::make_unique<T>();
-      projection->set_rotation(rotation);
-      projection->set_scale(scale);
+      projection->SetRotation(rotation);
+      projection->SetScale(scale);
       return projection;
     };
 
@@ -51,10 +51,10 @@ struct ProjectionInfo {
 
 // Configure projections here.
 static const ProjectionInfo kProjectionList[] = {
-  ProjectionInfo::Create<Cubic>("Cubic", false),
+//  ProjectionInfo::Create<Cubic>("Cubic", false),
   ProjectionInfo::Create<Equirectangular>("Equirectangular", false),
-  ProjectionInfo::Create<Gnomonic>("Gnomonic", false),
-  ProjectionInfo::Create<Orthographic>("Orthographic", false)
+  // ProjectionInfo::Create<Gnomonic>("Gnomonic", false),
+  // ProjectionInfo::Create<Orthographic>("Orthographic", false)
 };
 
 // Calls a function with each configured projection's ProjectionInfo entry.

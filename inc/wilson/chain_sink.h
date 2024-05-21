@@ -28,8 +28,15 @@ class ChainSink {
   // Clears the buffer to its initial state, as though nothing has been added.
   virtual void Clear() = 0;
 
-  // Starts a new chain.  If the current chain is empty, does nothing.
+  // End the current chain without closing it.
+  //
+  // Does nothing if there is no current chain.
   virtual void Break() = 0;
+
+  // Ends the current chain and closes it by moving back to the start.
+  //
+  // Does nothing if there is no current chain.
+  virtual void Close() = 0;
 
   // Appends a single point to the current chain.
   virtual void Append(const R2Point&) = 0;
@@ -37,13 +44,21 @@ class ChainSink {
   // Appends a span of points to the current chain.
   virtual void Append(absl::Span<const R2Point>) = 0;
 
+  // Returns the total number of vertices.
+  virtual ssize_t Size() const = 0;
+
   // Returns the size of the current chain.
   virtual ssize_t ChainSize() const = 0;
 
-  // Convenience method to test if the current chain is empty.
+  // Returns true if the current chain is empty.
   bool ChainEmpty() const {
     return ChainSize() == 0;
   }
+
+  // Returns true if the sink is empty.
+  bool Empty() const {
+    return Size() == 0;
+  }
 };
 
-}
+}  // namespace w

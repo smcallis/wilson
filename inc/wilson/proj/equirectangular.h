@@ -19,13 +19,16 @@
 #include <optional>
 #include <utility>
 
+#include "absl/base/optimization.h"
 #include "absl/functional/bind_front.h"
 #include "blend2d.h"
 #include "s2/s2cap.h"
 #include "s2/s2cell.h"
+#include "s2/s2edge_crossings.h"
 #include "s2/s2point.h"
 #include "s2/s2latlng.h"
 #include "s2/s2edge_distances.h"
+#include "s2/s2predicates.h"
 #include "s2/s2wedge_relations.h"
 
 #include "wilson/plane.h"
@@ -57,61 +60,56 @@ struct Equirectangular final : Projection<Equirectangular> {
     // This is equivalent to making the height unit-scale and the width twice
     // that.  We further adjust the dimensions by the current scale() value to
     // accommodate zooming.
-    double hh = scale()*unit_scale();
+    double hh = Scale()*UnitScale();
     double ww = 2*hh;
 
-    R2Point center = {width()/2, height()/2};
+    R2Point center = {Width()/2, Height()/2};
     outline_ = region2(
       R2Point(-ww/2, -hh/2) + center,
       R2Point(+ww/2, +hh/2) + center
     );
+
+    // Normal to the plane containing the antimeridian and a plane perpendicular
+    // to it where the antimeridian cut is on the positive side.
+    amnorm_ = Unrotate({0, 1, 0});
+    amperp_ = Unrotate({-1, 0, 0});
+    ampole_ = S2::RobustCrossProd(amnorm_, amperp_).Normalize();
+
+    // And an normal vector for the plane of the equator.
+    eqnorm_ = Unrotate({0, 0, 1});
   }
 
   // Populates a path representing the outline of the sphere on screen.  May
   // encompass the entire screen.
-  R2Shape& MakeOutline(absl::Nonnull<R2Shape*> out) const override {
-    out->Clear();
+  void MakeOutline(absl::Nonnull<ChainSink*> out) const override {
+    out->Break();
     out->Append(R2Point(outline_.lo().x(), outline_.hi().y()));
     out->Append(R2Point(outline_.hi().x(), outline_.hi().y()));
     out->Append(R2Point(outline_.hi().x(), outline_.lo().y()));
     out->Append(R2Point(outline_.lo().x(), outline_.lo().y()));
-    out->CloseChain();
-    return *out;
+    out->Close();
   }
 
   // Populates a path with a graticule with lines of latitude and longitude.
-  R2Shape& MakeGraticule(absl::Nonnull<R2Shape*> out) const override {
-    out->Clear();
+  void MakeGraticule(absl::Nonnull<ChainSink*> out) const override {
     // generate_graticule(path);
-    return *out;
   }
 
-  // Clips a single S2Point to the visible portion of the sphere.
-  // Returns true if the point is visible and false otherwise.
-  bool Clip(S2Point point) const override {
-    // All points are visible in an equirectangular projection.
-    return true;
+  // Projects a point from world space to unit space.
+  R2Point WorldToUnit(const S2Point& p) const override {
+    return Scale() * R2Point(
+      std::atan2(p.y(), p.x()) / M_PI,
+      -std::asin(p.z()) / M_PI
+    );
   }
 
-  EdgeList& Clip(  //
-    absl::Nonnull<EdgeList*> edges, const S2Shape::Edge& edge) const override {
-    return ClipInternal(edges, edge);
-  }
-
-  void Stitch(absl::Nonnull<R2Shape*> out, const S2Shape::Edge& edge, const S2Point& v0) const override {
-    // The edges of the projection are always straight vertical or horizontal
-    // lines so we can just use a line to stitch points together.
-    out->Append(Project(edge.v1));
-    out->Append(Project(v0));
-  }
-
-  R2Point WorldToUnit(S2Point p) const override {
-    return scale()*R2Point(std::atan2(p.y(), p.x()) / M_PI, -std::asin(p.z()) / M_PI);
-  }
-
-  bool UnitToWorld(absl::Nonnull<S2Point*> out, R2Point proj, bool nearest=false) const override {
-    double lat = proj.y()/scale();
-    double lon = proj.x()/scale();
+  // Attempts to convert a point from unit space back to world space.  If
+  // `nearest` is true then the closest point on the projection is returned,
+  // otherwise false is returned if the point is out of bounds.
+  bool UnitToWorld(  //
+    absl::Nonnull<S2Point*> out, const R2Point& proj, bool nearest) const override {
+    double lat = proj.y()/Scale();
+    double lon = proj.x()/Scale();
 
     if (std::fabs(lat) > 0.5 || std::fabs(lon) > 1) {
       if (!nearest) {
@@ -132,12 +130,43 @@ struct Equirectangular final : Projection<Equirectangular> {
     return true;
   }
 
-  R2Shape& Project(absl::Nonnull<R2Shape *> out, absl::Nonnull<ChainStitcher*>, const S2Shape&, double max_sq_error, ContainsPointFn contains) const override;
+  // Projects a point into screen space.  Returns true if it's visible.
+  bool Project(absl::Nonnull<R2Point*> out, const S2Point& point) const override {
+    *out = UnitToScreen(WorldToUnit(Rotate(PreRotate(point))));
+    return true;  // All points are visible.
+  }
+
+  // Projection functions.
+  void Project(absl::Nonnull<ChainSink*> out, const S2Shape::Edge&) const override;
+  void Project(absl::Nonnull<ChainSink*> out, const S2Shape&) const override;
+  void Project(absl::Nonnull<ChainSink*> out, absl::Nonnull<ChainStitcher*>, const S2Shape&, ContainsPointFn contains) const override;
 
 private:
   region2 outline_;
+  S2Point amnorm_;
+  S2Point amperp_;
+  S2Point ampole_;
+  S2Point eqnorm_;
 
-  // A crossing where an edge crossed the antimeridian.
+  // Identifiers for each of the four boundary segments of the projection.
+  static constexpr uint8_t kNone  = 0;
+  static constexpr uint8_t kNorth = 1;
+  static constexpr uint8_t kEast  = 2;
+  static constexpr uint8_t kSouth = 3;
+  static constexpr uint8_t kWest  = 4;
+
+  // Returns true if a boundary is east or west.
+  static constexpr inline bool IsEastWest(uint8_t b) {
+    return b && b % 2 == 0;
+  }
+
+  // Returns true if a boundary is north or south.
+  static constexpr inline bool IsNorthSouth(uint8_t b) {
+    return b && b % 2 == 1;
+  }
+
+  // A crossing where an edge crossed the anti-meridian.  We store the vertex
+  // index, the boundary that was crossed and the direction of the crossing.
   struct Crossing {
     Crossing() = default;
 
@@ -156,155 +185,550 @@ private:
     }
 
     int vertex;
-    uint8_t boundary;  // In the range [0,1] for left and right.
+    uint8_t boundary;
     bool incoming;
   };
 
-  using CrossingVector = absl::InlinedVector<Crossing, 16>;
+  // A pair of boundary identifiers.
+  struct BoundaryPair {
+    constexpr BoundaryPair()
+      : b0(kNone), b1(kNone) {}
 
-  // Clipping logic.  If crossings is given, it is populated as well.
-  EdgeList& ClipInternal(absl::Nonnull<EdgeList*> edges,
-    const S2Shape::Edge& edge, CrossingVector* crossings = nullptr) const {
-    edges->clear();
+    constexpr BoundaryPair(uint8_t b0, uint8_t b1)
+      : b0(b0), b1(b1) {}
 
-    // Returns -1, 0, or +1 depending on the value of x.
-    const auto Sign = [](double x) {
-      return x < 0 ? -1 : ((x > 0) ? +1 : 0);
-    };
-
-    // Normal to the plane containing the antimeridian and a plane perpendicular
-    // to it where the antimeridian cut is on the positive side.
-    const S2Point amnorm = Unrotate({0, 1, 0});
-    const S2Point amperp = Unrotate({-1, 0, 0});
-
-    int sign0 = Sign(edge.v0.DotProd(amnorm));
-    int sign1 = Sign(edge.v1.DotProd(amnorm));
-
-    // If both vertices were on one side, then there's nothing to do.
-    if ((sign0 < 0 && sign1 < 0) || (sign0 > 0 && sign1 > 0)) {
-      edges->emplace_back(edge);
-      return *edges;
+    // Returns a BoundaryPair with only b1 set.
+    static constexpr BoundaryPair Snap1(uint8_t b1) {
+      return BoundaryPair(kNone, b1);
     }
 
-    // Find the intersection point, flip it to the correct half of the sphere
-    // based on the orientation of the vertices across the anti-meridian.
-    S2Point isect = edge.v0.CrossProd(edge.v1).CrossProd(amnorm).Normalize();
-    if (sign1 - sign0 > 0) {
+    // Returns a BoundaryPair with only b0 set.
+    static constexpr BoundaryPair Snap0(uint8_t b0) {
+      return BoundaryPair(b0, kNone);
+    }
+
+    uint8_t b0;
+    uint8_t b1;
+  };
+
+  // There's four possible processing paths for an edge:
+  //
+  //   DROP - The edge isn't visible and can be dropped.
+  //
+  //   KEEP - Keep the edge as-is, it can be subdivided normally.
+  //
+  //   SNAP - One vertex or the other needs to be snapped to a boundary of the
+  //     projection.  One field of boundary will be set with the boundary to
+  //     snap the respective vertex to.
+  //
+  //   CHOP - The edge has to be broken due to wrapping across the anti-meridian
+  //    in this case, isect is set to the intersection point where the edge
+  //    crossed the anti-meridian.  The edge should be broken into two segments:
+  //
+  //      {edge.v0, isect} - with isect snapped to boundary.b0
+  //      {isect, edge.v1} - with isect snapped to boundary.b1
+  //
+  struct ClipResult {
+    enum Status {
+      kKeep, kDrop, kSnap, kChop
+    };
+
+    // Returns a ClipResult indicating that the edge should be kept as-is.
+    static constexpr ClipResult Keep() {
+      return {};
+    }
+
+    // Returns a ClipResult indicating we can drop the edge altogether.
+    static constexpr ClipResult Drop() {
+      return Snap({kNorth, kNorth});
+    }
+
+    // Returns a ClipResult indicating v0 and v1 should be snapped.
+    static constexpr ClipResult Snap(BoundaryPair b) {
+      ClipResult result;
+      result.boundary = b;
+      return result;
+    }
+
+    // Returns a ClipResult indicating v0 should be snapped to the boundary.
+    static constexpr ClipResult Snap0(uint8_t b0) {
+      return ClipResult::Snap(BoundaryPair::Snap0(b0));
+    }
+
+    // Returns a ClipResult indicating v1 should be snapped to the boundary.
+    static constexpr ClipResult Snap1(uint8_t b1) {
+      return ClipResult::Snap(BoundaryPair::Snap1(b1));
+    }
+
+    // Returns a ClipResult indicating the edge must be split in two.
+    static constexpr ClipResult Chop(const S2Point& isect, int dir) {
+      ClipResult result;
+      result.isect = isect;
+      result.boundary.b0 = (dir > 0) ? kEast : kWest;
+      result.boundary.b1 = (dir > 0) ? kWest : kEast;
+      return result;
+    }
+
+    // Returns a status code indicating how to process the edge.
+    Status status() const {
+      // Chop the edge in half.
+      if (isect.has_value()) {
+        return kChop;
+      }
+
+      bool snap = (boundary.b0 != kNone || boundary.b1 != kNone);
+      if (snap) {
+        // If we have two boundaries but they're the same, drop the edge.
+        if (boundary.b0 == boundary.b1) {
+          return kDrop;
+        }
+
+        // They're not the same, snap the vertices.
+        return kSnap;
+      }
+
+      // Keep the edge as-is.
+      return kKeep;
+    }
+
+    std::optional<S2Point> isect;
+    BoundaryPair boundary;
+  };
+
+  // Projects a point and snaps it to the given boundary, if any.
+  R2Point ProjectAndSnap(const S2Point& point, uint8_t b) const {
+    R2Point projected;
+    Project(&projected, point);
+
+    switch (b) {
+      case kWest:  projected.x(outline_.lo().x()); break;
+      case kEast:  projected.x(outline_.hi().x()); break;
+      case kNorth: projected.y(outline_.lo().y()); break;
+      case kSouth: projected.y(outline_.hi().y()); break;
+      default:
+        break;
+    }
+    return projected;
+  }
+
+  // Subdivides an edge and appends it to the output.  Takes a BoundaryPair that
+  // dictates whether to snap the endpoints to a boundary segment or not.  If
+  // snapping is requested, then the chain is broken before appending p0.
+  //
+  // Expects that the edge has been properly clipped so that projecting will not
+  // wrap in screen space, which will lead to unpredictable results.
+  void Subdivide(  //
+    ChainSink* out, const S2Shape::Edge& edge, BoundaryPair bs = {}) const {
+
+    // The real function, defined here because we may have to call it twice.
+    const auto Run = [&](const S2Shape::Edge& edge, BoundaryPair bs) {
+      R2Point p0 = ProjectAndSnap(edge.v0, bs.b0);
+      R2Point p1 = ProjectAndSnap(edge.v1, bs.b1);
+
+      // If we're clamping a vertex to the north or south pole (it happens),
+      // then just straight vertical lines.
+      bool subdivide = true;
+      if (IsNorthSouth(bs.b0)) {
+        DCHECK(!IsNorthSouth(bs.b1));
+        p0.x(p1.x());
+        subdivide = false;
+      }
+
+      if (IsNorthSouth(bs.b1)) {
+        DCHECK(!IsNorthSouth(bs.b0));
+        p1.x(p0.x());
+        subdivide = false;
+      }
+
+      if (bs.b0 || out->ChainEmpty()) {
+        out->Break();
+        out->Append(p0);
+      }
+
+      if (subdivide && (p1-p0).Norm2() > MaxSqError()) {
+        Subdivide(out, edge, {p0, p1});
+      }
+      out->Append(p1);
+    };
+
+    const int sign0 = s2pred::SignDotProd(edge.v0, eqnorm_);
+    const int sign1 = s2pred::SignDotProd(edge.v1, eqnorm_);
+
+    // If the vertices are on opposite sides of the equator, split the edge to
+    // avoid the inflection point that will occur at the equator, which can
+    // introduce error in the subdivision.
+    if (sign0 && sign0 == -sign1) {
+      S2Point isect = edge.v0.CrossProd(edge.v1).CrossProd(eqnorm_).Normalize();
+      if (sign0 - sign1 < 0) {
+        isect = -isect;
+      }
+
+      R2Point proj;
+      Project(&proj, isect);
+
+      Run({edge.v0, isect}, BoundaryPair::Snap0(bs.b0));
+      out->Append(proj);
+      Run({isect, edge.v1}, BoundaryPair::Snap1(bs.b1));
+    } else {
+      Run(edge, bs);
+    }
+  }
+
+  // Helper method that recursively subdivides an edge.
+  void Subdivide(absl::Nonnull<ChainSink*> out,
+    const S2Shape::Edge& s2edge, const R2Shape::Edge& r2edge) const {
+
+    // Compute a point halfway along the edge.
+    S2Point v2 = S2::Interpolate(s2edge.v0, s2edge.v1, 0.5);
+
+    R2Point p2;
+    Project(&p2, v2);
+
+    // Compute the distance from the projected point to the line from p0 to p1.
+    R2Point vp = p2 - r2edge.v0;
+    R2Point vn = r2edge.v1 - r2edge.v0;
+    double dist2 = (vp - (vp.DotProd(vn)*vn)/vn.Norm2()).Norm2();
+
+    // If we're too far from the line, recursively subdivide each half.
+    if (dist2 > MaxSqError()) {
+      Subdivide(out, {s2edge.v0, v2}, {r2edge.v0, p2});
+      out->Append(p2);          //
+      Subdivide(out, {v2, s2edge.v1}, {p2, r2edge.v1});
+    }
+  }
+
+  // Processes an edge and returns a ClipResult to use to process it.
+  ClipResult ClipEdge(const S2Shape::Edge& edge) const {
+    // Check for antipodal vertices, which should never occur.
+    DCHECK(edge.v0 != -edge.v1);
+
+    int sign0 = s2pred::SignDotProd(edge.v0, amnorm_);
+    int sign1 = s2pred::SignDotProd(edge.v1, amnorm_);
+
+    const auto InAmHemisphere = [&](const S2Point& point) {
+      return s2pred::SignDotProd(point, amperp_) > 0;
+    };
+
+    // The vertex signs are the same.
+    if (ABSL_PREDICT_TRUE(sign0 == sign1)) {
+      // The edge is entirely on one side of the anti-meridian, just keep it.
+      // This is by far the most common case, so most testing will end here.
+      if (ABSL_PREDICT_TRUE(sign0 != 0)) {
+        return ClipResult::Keep();
+      }
+
+      // The edge is exactly on the prime meridian plane.
+      if (sign0 == 0) {
+        // Look at the signs relative to the normal defining the hemisphere of
+        // the anti-meridian.
+        sign0 = s2pred::SignDotProd(edge.v0, amperp_);
+        sign1 = s2pred::SignDotProd(edge.v1, amperp_);
+
+        if (sign0 == sign1) {
+          // Keep the edge if it's in the other hemisphere as the anti-meridian,
+          // and drop it if it lands exactly on the anti-meridian itself.
+          if (sign0 == -1) return ClipResult::Keep();
+          if (sign0 == +1) return ClipResult::Drop();
+
+          // Both vertices landed exactly on the perpendicular plane too?! They
+          // must both be at the intersection of two perpendicular planes
+          // through the origin, which means they're at the poles.
+          //
+          // Either they're on the same pole and we can't see the edge or
+          // they're on opposite poles and thus antipodal points, which can't
+          // happen.  Either way, we can drop the edge.
+          DCHECK_EQ(sign0, 0);
+          return ClipResult::Drop();
+        }
+
+        DCHECK(sign0 != sign1);
+
+        // Signs aren't equal.  If one or the other is zero, then snap to the
+        // appropriate boundary.
+        if (sign0 == 0) {
+          sign0 = s2pred::SignDotProd(edge.v0, ampole_);
+          if (sign0 > 0) return ClipResult::Snap0(kNorth);
+          if (sign0 < 0) return ClipResult::Snap0(kSouth);
+          ABSL_UNREACHABLE(); // v0 would have to be at the origin.
+        }
+
+        if (sign1 == 0) {
+          sign1 = s2pred::SignDotProd(edge.v1, ampole_);
+          if (sign1 > 0) return ClipResult::Snap1(kNorth);
+          if (sign1 < 0) return ClipResult::Snap1(kSouth);
+          ABSL_UNREACHABLE(); // v1 would have to be at the origin.
+        }
+
+        // Signs aren't equal, and neither is zero, so they're one of either
+        // (-, +) or (+, -).  Meaning this line extends directly over a pole.
+        // Let's cheat a little bit and find a mid-point and see which
+        // hemisphere it's in to determine which pole to snap to.
+        const S2Point mid = S2::Interpolate(edge.v0, edge.v1, 0.5);
+        int midsign = s2pred::SignDotProd(mid, ampole_);
+
+        if (sign0 > 0) {
+          DCHECK_LT(sign1, 0);
+          if (midsign > 0) return ClipResult::Snap0(kNorth);
+          if (midsign < 0) return ClipResult::Snap0(kSouth);
+          ABSL_UNREACHABLE();
+        }
+
+        if (sign1 > 0) {
+          DCHECK_LT(sign0, 0);
+          if (midsign > 0) return ClipResult::Snap1(kNorth);
+          if (midsign < 0) return ClipResult::Snap1(kSouth);
+          ABSL_UNREACHABLE();
+        }
+      }
+      ABSL_UNREACHABLE();
+    }
+
+    // The vertex signs are different.
+
+    // v0 was exactly on the meridian.  If it's in the same hemisphere as the
+    // anti-meridian, then we have to snap it to a boundary, otherwise just keep
+    // the edge as-is.
+    if (sign0 == 0) {
+      DCHECK_NE(sign1, 0);
+      if (InAmHemisphere(edge.v0)) {
+        if (sign1 < 0) return ClipResult::Snap0(kWest);
+        if (sign1 > 0) return ClipResult::Snap0(kEast);
+        ABSL_UNREACHABLE();
+      }
+      return ClipResult::Keep();
+    }
+
+    // v1 was exactly on the meridian.  If it's in the same hemisphere as the
+    // anti-meridian, then we have to snap it to a boundary, otherwise just keep
+    // the edge as-is.
+    if (sign1 == 0) {
+      DCHECK_NE(sign0, 0);
+      if (InAmHemisphere(edge.v1)) {
+        if (sign0 < 0) return ClipResult::Snap1(kWest);
+        if (sign0 > 0) return ClipResult::Snap1(kEast);
+        ABSL_UNREACHABLE();
+      }
+      return ClipResult::Keep();
+    }
+
+    // The edge definitely crosses the anti-meridian plane.  See if it crossed
+    // in the same hemisphere as the anti-meridian.  Find the intersection point.
+    S2Point isect = edge.v0.CrossProd(edge.v1).CrossProd(amnorm_).Normalize();
+    if (sign0 - sign1 < 0) {
       isect = -isect;
     }
 
-    // The edge crossed the anti-meridian plane, but it did so in the opposite
-    // hemisphere, so the edge wasn't cut.
-    if (isect.DotProd(amperp) <= 0) {
-      edges->emplace_back(edge);
-      return *edges;
+    // If it crossed in the opposite hemisphere just keep the edge.
+    if (!InAmHemisphere(isect)) {
+      return ClipResult::Keep();
     }
 
-    // Both signs are zero, edge is on the antimeridian, ignore it.
-    if (sign0 == 0 && sign1 == 0) {
-      return *edges;
-    }
-
-    // The edges weren't both on one side and the intersection point was in the
-    // correct half of the sphere for the edge to have crossed the meridian.
-    //
-    // Altogether, there are nine possible combinations of -1, 0, +1 sign for
-    // the two dot products, and we've handled two, (-,- and +,+), so we need to
-    // handle the remaining seven cases.
-    //
-    // If the signs are actually opposite (-,+ or +,-), then we can just split
-    // the edge and perturb the vertices to the right side to avoid accidental
-    // meridian wrapping due to numerical error.
-    if (sign0 == -sign1) {
-      const S2Shape::Edge edge0(
-        edge.v0, S2::Interpolate(edge.v0, isect, 1 - 1e-6));
-
-      const S2Shape::Edge edge1(
-        S2::Interpolate(isect, edge.v1, 1e-6), edge.v1);
-
-      edges->emplace_back(edge0);
-      edges->emplace_back(edge1);
-
-      if (crossings) {
-        crossings->push_back(Crossing::Outgoing(-1, sign0 > 0 ? 0 : 1));
-        crossings->push_back(Crossing::Incoming(-1, sign0 > 0 ? 1 : 0));
-      }
-
-      return *edges;
-    }
-
-    // One or the other sign was zero.  Bump the zero vertex off of the
-    // antimeridian towards the other vertex.
-    if (sign0 == 0) {
-      edges->emplace_back(S2::Interpolate(edge.v0, edge.v1, 1e-6), edge.v1);
-      return *edges;
-    }
-
-    if (sign1 == 0) {
-      edges->emplace_back(edge.v0, S2::Interpolate(edge.v0, edge.v1, 1-1e-6));
-      return *edges;
-    }
-
-    return *edges;
+    // The edge crossed the anti-meridian.  The signs must be opposite so we can
+    // chop the edge into two pieces.
+    DCHECK_EQ(sign0, -sign1);
+    return ClipResult::Chop(isect, sign0 - sign1);
   }
 };
 
+////////////////////////////////////////////////////////////////////////////////
+// Implementation
+////////////////////////////////////////////////////////////////////////////////
 
-inline R2Shape& Equirectangular::Project(absl::Nonnull<R2Shape *> out,
-  absl::Nonnull<ChainStitcher*> stitcher, const S2Shape& shape, double max_sq_error, ContainsPointFn contains) const {
+inline void Equirectangular::Project(absl::Nonnull<ChainSink*> out,
+  const S2Shape::Edge& edge) const {
 
-  const bool is_polygon = shape.dimension() == 2;
+  const ClipResult ans = ClipEdge(edge);
+  const uint8_t b0 = ans.boundary.b0;
+  const uint8_t b1 = ans.boundary.b1;
 
-  EdgeList edges;
-  CrossingVector crossings;
+  switch (ans.status()) {
+    // The edge was dropped, we can just ignore it.
+    case ClipResult::kDrop:
+      return;
 
+    // The edge was kept as-is, we can just subdivide it normally.a
+    case ClipResult::kKeep:
+      Subdivide(out, edge);
+      return;
+
+    // The edge needs to be chopped in half since it wrapped.
+    case ClipResult::kChop:
+      Subdivide(out, {edge.v0, *ans.isect}, BoundaryPair::Snap1(b0));
+      out->Break();
+      Subdivide(out, {*ans.isect, edge.v1}, BoundaryPair::Snap0(b1));
+      return;
+
+    // One or the other vertex needs to be snapped to a boundary.
+    case ClipResult::kSnap:
+      if (b0) {
+        DCHECK(!b1);
+        out->Break();
+        Subdivide(out, edge, BoundaryPair::Snap0(b0));
+      }
+
+      if (b1) {
+        DCHECK(!b0);
+        Subdivide(out, edge, BoundaryPair::Snap1(b1));
+        out->Break();
+      }
+      return;
+  }
+  ABSL_UNREACHABLE();
+}
+
+inline void Equirectangular::Project(  //
+  absl::Nonnull<ChainSink*> out, const S2Shape& shape) const {
+  DCHECK_LT(shape.dimension(), 2);
+
+  // Points don't need anything fancy, just project them.
+  out->Clear();
+  if (shape.dimension() == 0) {
+    for (int chain = 0; chain < shape.num_chains(); ++chain) {
+      for (int i = 0, n = shape.chain(chain).length; i < n; ++i) {
+        R2Point proj;
+        Project(&proj, shape.chain_edge(chain, i).v0);
+        out->Append(proj);
+        out->Break();
+      }
+    }
+    return;
+  }
+
+  // Subdivide edges and split chains as needed.
+  for (int chain = 0; chain < shape.num_chains(); ++chain) {
+    out->Break();
+
+    for (int i = 0, n = shape.chain(chain).length; i < n; ++i) {
+      const S2Shape::Edge& edge = shape.chain_edge(chain, i);
+
+      ClipResult ans = ClipEdge(edge);
+      const uint8_t b0 = ans.boundary.b0;
+      const uint8_t b1 = ans.boundary.b1;
+
+      switch (ans.status()) {
+        // The edge was dropped, ignore it.
+        case ClipResult::kDrop:
+          break;
+
+        // The edge was kept as-is, just subdivide normally.
+        case ClipResult::kKeep:
+          Subdivide(out, edge);
+          break;
+
+        // We have to chop the edge into two pieces.
+        case ClipResult::kChop:
+          Subdivide(out, {edge.v0, *ans.isect}, BoundaryPair::Snap1(b0));
+          out->Break();
+          Subdivide(out, {*ans.isect, edge.v1}, BoundaryPair::Snap0(b1));
+          break;
+
+        // We need to snap one vertex or the other.
+        case ClipResult::kSnap:
+          if (b0) {
+            DCHECK(!b1);
+            Subdivide(out, edge, BoundaryPair::Snap0(b0));
+          }
+
+          if (b1) {
+            DCHECK(!b0);
+            Subdivide(out, edge, BoundaryPair::Snap1(b1));
+          }
+          break;
+      }
+    }
+  }
+}
+
+inline void Equirectangular::Project(absl::Nonnull<ChainSink*> out,
+  absl::Nonnull<ChainStitcher*> stitcher,
+  const S2Shape& shape, ContainsPointFn contains) const {
+
+  // Delegate points and polygons to the other Project().
+  if (shape.dimension() != 2) {
+    return Project(out, shape);
+  }
+
+  absl::InlinedVector<Crossing, 16> crossings;
   stitcher->Clear();
 
   // Subdivide edges and split chains as needed.
   for (int chain = 0; chain < shape.num_chains(); ++chain) {
     stitcher->Break();
 
-    int start = stitcher->size();
-    int nedge = shape.chain(chain).length;
-    for (int i = 0; i < nedge; ++i) {
-      ClipInternal(&edges, shape.chain_edge(chain, i), &crossings);
+    const int start = stitcher->Size();
+    for (int i = 0, n = shape.chain(chain).length; i < n; ++i) {
+      const S2Shape::Edge& edge = shape.chain_edge(chain, i);
 
-      if (edges.size() == 2) {
-        // The edge was subdivided so two crossings were appended.  Fix up their
-        // actual vertex indices after we subdivide the edges.
-        Subdivide(stitcher, edges[0], max_sq_error);
-        int index = stitcher->size() - 1;
-        stitcher->Break();
-        Subdivide(stitcher, edges[1], max_sq_error);
+      ClipResult ans = ClipEdge(edge);
+      const uint8_t b0 = ans.boundary.b0;
+      const uint8_t b1 = ans.boundary.b1;
 
-        crossings[crossings.size()-2].vertex = index;
-        crossings[crossings.size()-1].vertex = index + 1;
-      } else {
-        for (const S2Shape::Edge& edge : edges) {
-          Subdivide(stitcher, edge, max_sq_error);
+      switch (ans.status()) {
+        // Edge was dropped, ignore it.
+        case ClipResult::kDrop:
+          break;
+
+        // Edge was kept as-is, just subdivide it normally.
+        case ClipResult::kKeep:
+          Subdivide(stitcher, edge);
+          break;
+
+        // We have to chop the edge into two pieces.
+        case ClipResult::kChop: {
+          // Tessellate the first half of the edge.  Snap isect to a boundary.
+          Subdivide(stitcher, {edge.v0, *ans.isect}, BoundaryPair::Snap1(b0));
+          stitcher->Break();
+
+          // Add crossings for the two boundaries we crossed.
+          const int idx = stitcher->Size() - 1;
+          crossings.emplace_back(Crossing::Outgoing(idx + 0, b0));
+          crossings.emplace_back(Crossing::Incoming(idx + 1, b1));
+
+          // Tessellate the second half of the edge.  Snap isect to a boundary.
+          Subdivide(stitcher, {*ans.isect, edge.v1}, BoundaryPair::Snap0(b1));
+          break;
+        }
+
+        // We need to snap one vertex or the other.
+        case ClipResult::kSnap: {
+          if (b0) {
+            DCHECK(!b1);
+            const int index = stitcher->Size();
+            Subdivide(stitcher, edge, BoundaryPair::Snap0(b0));
+
+            // Don't add crossings for the poles.
+            if (IsEastWest(b0)) {
+              crossings.push_back(Crossing::Incoming(index, b0));
+            }
+          }
+
+          if (b1) {
+            DCHECK(!b0);
+            Subdivide(stitcher, edge, BoundaryPair::Snap1(b1));
+
+            // Don't add crossings for the poles.
+            if (IsEastWest(b1)) {
+              crossings.push_back(Crossing::Outgoing(stitcher->Size() - 1, b1));
+            }
+          }
+          break;
         }
       }
     }
 
-    // Ensure that polygon chains are closed properly if need be.
-    if (is_polygon) {
-      if (stitcher->size() > start && stitcher->back() == (*stitcher)[start]) {
-        stitcher->pop_back();
-        stitcher->Connect(stitcher->size()-1, start);
-      }
+    // If the chain closed, remove the repeat point and connect to the start.
+    if (stitcher->Size() > start && stitcher->back() == (*stitcher)[start]) {
+      stitcher->pop_back();
+      stitcher->Connect(stitcher->Size()-1, start);
     }
   }
 
-  // if there's no crossings, the polygon must entirely contain or not contain
+  // If there's no crossings, the polygon must entirely contain or not contain
   // the boundary of the projection.  Test the image of the north pole to
   // determine which.
   const S2Point north_pole = Unrotate({0, 0, 1});
-  if (is_polygon && crossings.empty() && contains(north_pole)) {
-    out->Append(R2Point(outline_.lo().x(), outline_.hi().y()));
-    out->Append(R2Point(outline_.hi().x(), outline_.hi().y()));
-    out->Append(R2Point(outline_.hi().x(), outline_.lo().y()));
-    out->Append(R2Point(outline_.lo().x(), outline_.lo().y()));
-    out->CloseChain();
+  if (crossings.empty() && contains(north_pole)) {
+    MakeOutline(out);
   }
 
   // Sort crossings CCW around the projection boundary.
@@ -320,8 +744,11 @@ inline R2Shape& Equirectangular::Project(absl::Nonnull<R2Shape *> out,
       return a.incoming < b.incoming;
     }
 
+    // Crossings should only be on the east and west boundaries.
+    DCHECK(IsEastWest(a.boundary));
+
     // Note that these are in screen space, so Y increases -down-.
-    if (a.boundary == 0) {
+    if (a.boundary == kEast) {
       return ay > by;
     } else {
       return ay < by;
@@ -330,11 +757,9 @@ inline R2Shape& Equirectangular::Project(absl::Nonnull<R2Shape *> out,
 
   // Now stitch crossings together.
   for (int ii = 0, N = crossings.size(); ii < N; ++ii) {
-    DCHECK_NE(crossings[ii].vertex, -1);
-
     // Skip to an outgoing crossing.
     const Crossing& outgoing = crossings[ii];
-    if (outgoing.incoming) {
+    if (outgoing.vertex < 0 || outgoing.incoming) {
       continue;
     }
 
@@ -342,7 +767,7 @@ inline R2Shape& Equirectangular::Project(absl::Nonnull<R2Shape *> out,
     // point, it may not necessarily be the next vertex, but should exist.
     int jj = (ii + 1) % N;
     for (; jj != ii; jj = (jj + 1) % N) {
-      if (crossings[jj].incoming) {
+      if (outgoing.vertex >= 0 && crossings[jj].incoming) {
         break;
       }
     }
@@ -357,7 +782,7 @@ inline R2Shape& Equirectangular::Project(absl::Nonnull<R2Shape *> out,
       if (ii > jj) {
         // Crossings on the same boundary but outgoing was after incoming so we
         // have to walk all the way around the corners.
-        if (outgoing.boundary == 0) {
+        if (outgoing.boundary == kEast) {
           for (int corner : {1, 0, 2, 3}) {
             corners.emplace_back(corner);
           }
@@ -369,7 +794,7 @@ inline R2Shape& Equirectangular::Project(absl::Nonnull<R2Shape *> out,
       }
     } else {
       // Crossings on different boundaries, stitch two corners.
-      if (outgoing.boundary == 0) {
+      if (outgoing.boundary == kEast) {
         corners.emplace_back(1);
         corners.emplace_back(0);
       } else {
@@ -382,21 +807,19 @@ inline R2Shape& Equirectangular::Project(absl::Nonnull<R2Shape *> out,
     for (int corner : corners) {
       stitcher->Break();
       stitcher->Append(outline_.GetVertex(corner));
-
-      last = stitcher->Connect(last, stitcher->size() - 1);
+      last = stitcher->Connect(last, stitcher->Size() - 1);
     }
     stitcher->Connect(last, incoming.vertex);
   }
 
   const auto AddChain = [&](absl::Span<const R2Point> vertices) {
-    out->AddChain(vertices, shape.dimension() == 2);
+    out->Append(vertices);
+    out->Close();
   };
 
   if (!stitcher->EmitChains(AddChain)) {
-    fprintf(stderr, "[Equirectangular] Detected infinite loop splicing chains!\n");
+    fprintf(stderr, "[Equirectangular] Saw infinite loop splicing chains!\n");
   }
-
-  return *out;
 }
 
 } // namespace w
