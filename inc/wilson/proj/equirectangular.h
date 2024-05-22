@@ -655,7 +655,7 @@ inline void Equirectangular::Project(absl::Nonnull<ChainSink*> out,
   for (int chain = 0; chain < shape.num_chains(); ++chain) {
     stitcher->Break();
 
-    const int start = stitcher->Size();
+    const int start = stitcher->Next();
     for (int i = 0, n = shape.chain(chain).length; i < n; ++i) {
       const S2Shape::Edge& edge = shape.chain_edge(chain, i);
 
@@ -680,7 +680,7 @@ inline void Equirectangular::Project(absl::Nonnull<ChainSink*> out,
           stitcher->Break();
 
           // Add crossings for the two boundaries we crossed.
-          const int idx = stitcher->Size() - 1;
+          const int idx = stitcher->Last();
           crossings.emplace_back(Crossing::Outgoing(idx + 0, b0));
           crossings.emplace_back(Crossing::Incoming(idx + 1, b1));
 
@@ -693,12 +693,12 @@ inline void Equirectangular::Project(absl::Nonnull<ChainSink*> out,
         case ClipResult::kSnap: {
           if (b0) {
             DCHECK(!b1);
-            const int index = stitcher->Size();
+            const int next = stitcher->Next();
             Subdivide(stitcher, edge, BoundaryPair::Snap0(b0));
 
             // Don't add crossings for the poles.
             if (IsEastWest(b0)) {
-              crossings.push_back(Crossing::Incoming(index, b0));
+              crossings.push_back(Crossing::Incoming(next, b0));
             }
           }
 
@@ -708,7 +708,7 @@ inline void Equirectangular::Project(absl::Nonnull<ChainSink*> out,
 
             // Don't add crossings for the poles.
             if (IsEastWest(b1)) {
-              crossings.push_back(Crossing::Outgoing(stitcher->Size() - 1, b1));
+              crossings.push_back(Crossing::Outgoing(stitcher->Last(), b1));
             }
           }
           break;
@@ -717,9 +717,9 @@ inline void Equirectangular::Project(absl::Nonnull<ChainSink*> out,
     }
 
     // If the chain closed, remove the repeat point and connect to the start.
-    if (stitcher->Size() > start && stitcher->back() == (*stitcher)[start]) {
-      stitcher->pop_back();
-      stitcher->Connect(stitcher->Size()-1, start);
+    if (stitcher->Size() > start && stitcher->Back() == (*stitcher)[start]) {
+      stitcher->PopBack();
+      stitcher->Connect(stitcher->Last(), start);
     }
   }
 
@@ -807,7 +807,7 @@ inline void Equirectangular::Project(absl::Nonnull<ChainSink*> out,
     for (int corner : corners) {
       stitcher->Break();
       stitcher->Append(outline_.GetVertex(corner));
-      last = stitcher->Connect(last, stitcher->Size() - 1);
+      last = stitcher->Connect(last, stitcher->Last());
     }
     stitcher->Connect(last, incoming.vertex);
   }

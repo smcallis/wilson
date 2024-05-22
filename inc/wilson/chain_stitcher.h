@@ -50,30 +50,16 @@ class ChainStitcher : public ChainSink {
 
   // Close the current chain, the next vertex appended will be unconnected.
   void Close() override {
-    if (!Broken()) {
-      if (!MaybeClose()) {
-        Connect(tail_, head_);
-        Break();
-      }
-    }
-  }
-
-  // Closes the chain but only if it closed naturally (i.e. the first and last
-  // vertices were equal).  If they are, then remove the duplicate point and
-  // close the chain.  Returns true and breaks the chain if it closed naturally,
-  // otherwise returns false and leaves the chain unbroken.
-  bool MaybeClose() {
     if (Broken()) {
-      return false;
+      return;
     }
 
     if (tail_ > head_ && nodes_[tail_] == nodes_[head_]) {
-      pop_back();
-      Connect(tail_, head_);
-      Break();
-      return true;
+      PopBack();
     }
-    return false;
+
+    Connect(tail_, head_);
+    Break();
   }
 
   // Appends a new vertex to the buffer, connecting it to the previous vertex.
@@ -106,17 +92,24 @@ class ChainStitcher : public ChainSink {
     return Broken() ? 0 : Size() - head_;
   }
 
-  // Returns true if we're at the start of a chain, i.e. the last vertex is the
-  // unconnected vertex.
-  bool start_of_chain() const {
-    return tail_ == kUnconnected;
+  // Returns the index of the last vertex (may be kUnconnected if there is none.
+  int Last() const {
+    return Size() - 1;
+  }
+
+  // Returns the index the next vertex added will have.
+  int Next() const {
+    return Size();
   }
 
   // Returns the last vertex appended.
-  const R2Point& back() const { return nodes_.back(); }
+  const R2Point& Back() const { return nodes_.back(); }
+
+  // Returns the first vertex appended.
+  const R2Point& Front() const { return nodes_.front(); }
 
   // Removes the last vertex added (if any).
-  void pop_back() {
+  void PopBack() {
     nodes_.pop_back();
     nexts_.pop_back();
     tail_ = nodes_.size() - 1;
@@ -196,5 +189,75 @@ class ChainStitcher : public ChainSink {
   std::vector<R2Point> scratch_;
 };
 
+#ifdef DOCTEST_LIBRARY_INCLUDED
 
+TEST_SUITE("ChainStitcher") {
+  TEST_CASE("Default Instance") {
+    ChainStitcher stitcher;
+    TCHECK(stitcher.Empty());
+    TCHECK(stitcher.Size() == 0);
+
+    // When created there's no active chain.
+    TCHECK(stitcher.Broken());
+  }
+
+  TEST_CASE("Appending Points") {
+    ChainStitcher stitcher;
+
+    std::vector<R2Point> points = {{0, 0}, {2, 2}, {1, 2}};
+    stitcher.Append(points);
+    TCHECK(!stitcher.Broken());
+    TCHECK(!stitcher.Empty());
+    TCHECK(stitcher.Size() == points.size());
+    TCHECK(stitcher.ChainSize() == points.size());
+
+    SUBCASE("Break Is Idempotent") {
+      stitcher.Break();
+      TCHECK(stitcher.Broken());
+      TCHECK(!stitcher.Empty());
+      stitcher.Break();
+      TCHECK(stitcher.Broken());
+    }
+
+    SUBCASE("Can Clear") {
+      stitcher.Clear();
+      TCHECK(stitcher.Empty());
+      TCHECK(stitcher.Size() == 0);
+      TCHECK(stitcher.ChainSize() == 0);
+    }
+
+    SUBCASE("Not Naturally Closed") {
+      TCHECK(!stitcher.Broken());
+    }
+
+    SUBCASE("Can Close Manually") {
+      stitcher.Close();
+      TCHECK(stitcher.Broken());
+      TCHECK(stitcher.Size() == points.size());
+      TCHECK(stitcher.ChainSize() == 0);
+    }
+  }
+
+  TEST_CASE("Natural Closure") {
+    ChainStitcher stitcher;
+
+    std::vector<R2Point> points = {{0, 0}, {2, 2}, {1, 2}, {0, 0}};
+    stitcher.Append(points);
+    TCHECK(!stitcher.Broken());
+    TCHECK(!stitcher.Empty());
+    TCHECK(stitcher.Size() == points.size());
+    TCHECK(stitcher.ChainSize() == points.size());
+
+    stitcher.Close();
+    TCHECK(stitcher.Size() == points.size() - 1);
+    TCHECK(stitcher.ChainSize() == 0);
+
+    stitcher.EmitChains([&](auto pnts) {
+      TCHECK(pnts.size() == points.size() - 1);
+    });
+  }
 }
+
+#endif
+
+}  // namespace w

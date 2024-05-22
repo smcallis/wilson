@@ -13,7 +13,8 @@
 // limitations under the License.
 
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
-#include <third_party/doctest.h>
+#include "wilson/testing.h"
 
 // Add headers with tests here.
 #include "wilson/region.h"
+#include "wilson/chain_stitcher.h"
