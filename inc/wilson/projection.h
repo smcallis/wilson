@@ -160,7 +160,7 @@ static inline absl::AnyInvocable<bool(const S2Point&)> IndexedContains(
 class IProjection {
 public:
   // The default distance-squared error (in pixels) when subdividing.
-  static constexpr double kDefaultProjectionErrorSq = 0.25*0.25;
+  static constexpr double kDefaultProjectionErrorSq = 0.125*0.125;
 
   // Returns true if a shape contains a given point, false otherwise.
   using ContainsPointFn = absl::AnyInvocable<bool(const S2Point&)>;
@@ -175,8 +175,11 @@ public:
       rotate_inv_ = rotation_.Inverse().ToTransform();
     }
 
-    double scale() const { return scale_; }
-    Quaternion rotation() const { return rotation_; }
+    // Returns the current scale factor.
+    double Scale() const { return scale_; }
+
+    // Returns the current rotation.
+    Quaternion Rotation() const { return rotation_; }
 
     // Rotate a point by the forward rotation set by the user.
     S2Point RotateFwd(S2Point p) const {
@@ -197,43 +200,42 @@ public:
     Affine3 rotate_inv_;
   };
 
-  using EdgeList = absl::InlinedVector<S2Shape::Edge, 2>;
-  using EdgeVisitorFn = absl::FunctionRef<void(const R2Shape&)>;
-
   virtual ~IProjection() = default;
 
-  // Resizes screen space to the given dimensions.
-  virtual void Resize(int width, int height) = 0;
-
-  // Returns the current width of screen space.
-  virtual double Width() const = 0;
-
-  // Returns the current height of screen space.
-  virtual double Height() const = 0;
-
-  // Returns a 2D region representing screen space.
-  virtual region2 Screen() const = 0;
-
-  // Returns an S2Cap covering the viewport.  This is a coarse covering but
-  // generally much faster than getting a full viewport covering via Viewport().
-  virtual S2Cap Viewcap() const = 0;
-
-  // Returns an S2CellUnion cell covering for the visible region of the sphere.
-  const S2CellUnion& Viewport() const;
-
-  // Returns the scale factor between unit and screen space.  Any unit vector in
-  // unit space will have this length in screen space.
-  virtual double UnitScale() const = 0;
+  //--------------------------------------------------------------------------
+  // Configuration API
+  //--------------------------------------------------------------------------
 
   // Sets the maximum squared error (in pixels) for edge tessellation.
-  //
-  // Defaults to kDefaultProjectionErrorSq.
+  // Default: kDefaultProjectionErrorSq
   void SetMaxSqError(double error) {
     max_sq_error_ = error;
   }
 
   // Returns the maximum squared error (in pixels) for edge tessellation.
-  double MaxSqError() const { return max_sq_error_; }
+  double MaxSqError() const {
+    return max_sq_error_;
+  }
+
+  // Sets the rotation to apply to points before projection.
+  void SetRotation(const Quaternion& q) {
+    SetTransform({transform_.Scale(), q});
+  }
+
+  // Returns a quaternion representing the current rotation.
+  Quaternion Rotation() const {
+    return transform_.Rotation();
+  }
+
+  // Sets the scale to apply when projecting points.
+  void SetScale(double scale) {
+    SetTransform(Transform(scale, transform_.Rotation()));
+  }
+
+  // Returns the current scale factor.
+  double Scale() const {
+    return transform_.Scale();
+  }
 
   // Returns the un-rotated image of the point (1, 0, 0).
 
@@ -242,26 +244,6 @@ public:
   S2Point Nadir() const {
     return nadir_;
   }
-
-  // Sets the rotation to apply to points before projection.  This has the
-  // effect of moving the nadir() point.
-  void SetRotation(const Quaternion& q) {
-    SetTransform({transform_.scale(), q});
-  }
-
-  // Returns a quaternion representing the current rotation.
-  Quaternion Rotation() const {
-    return transform_.rotation();
-  }
-
-  // Sets the scale factor to apply when projecting points.  This has the effect
-  // of 'zooming' around the nadir() point.
-  void SetScale(double scale) {
-    SetTransform(Transform(scale, transform_.rotation()));
-  }
-
-  // Returns the current scale factor.
-  double Scale() const { return transform_.scale(); }
 
   // Pushes the current transform onto a stack; must pair with PopTransform().
   void PushTransform() {
@@ -279,6 +261,53 @@ public:
     return true;
   }
 
+  //--------------------------------------------------------------------------
+  // Size API
+  //--------------------------------------------------------------------------
+
+  // Resizes screen space to the given dimensions.
+  virtual void    Resize(int width, int height) = 0;
+
+  // Returns the current width of screen space.
+  virtual double  Width() const = 0;
+
+  // Returns the current height of screen space.
+  virtual double  Height() const = 0;
+
+  // Returns a 2D region representing screen space.
+  virtual region2 Screen() const = 0;
+
+  // Returns the scale factor between unit and screen space.
+  //
+  // Any unit vector in unit space will have this length in screen space.
+  virtual double UnitScale() const = 0;
+
+  //--------------------------------------------------------------------------
+  // Utility API
+  //--------------------------------------------------------------------------
+
+  // Appends an outline for the projection in screen space to the given sink.
+  //
+  // Does not clear the sink before appending.  The resulting outline is
+  // suitable for filling with a background color for the projection as a whole.
+  virtual void MakeOutline(absl::Nonnull<ChainSink*> out) const = 0;
+
+  // Appends a graticule showing lines of latitude and longitude to a sink.
+  //
+  // Does not clear the sink before appending.
+  virtual void MakeGraticule(absl::Nonnull<ChainSink*> out) const = 0;
+
+  // Returns an S2Cap covering the viewport.  This is a coarse covering but
+  // generally much faster than getting a full viewport covering via Viewport().
+  virtual S2Cap Viewcap() const = 0;
+
+  // Returns an S2CellUnion cell covering for the visible region of the sphere.
+  virtual const S2CellUnion& Viewport() const;
+
+  //--------------------------------------------------------------------------
+  // Transformation API
+  //--------------------------------------------------------------------------
+
   // Rotates a point using the current Rotation().
   S2Point Rotate(const S2Point& point) const {
     return transform_.RotateFwd(point);
@@ -292,6 +321,12 @@ public:
   // Converts a point from world space to unit space.
   virtual R2Point WorldToUnit(const S2Point& point) const = 0;
 
+  // Converts a point from unit space to screen space.
+  virtual R2Point UnitToScreen(const R2Point& point) const = 0;
+
+  // Converts a point from screen space to unit space.
+  virtual R2Point ScreenToUnit(const R2Point&) const = 0;
+
   // Converts a point from unit space back to world space.  If the inverse
   // projection of the point hits the unit sphere, then that point is returned.
   //
@@ -300,27 +335,12 @@ public:
   virtual bool UnitToWorld( //
     absl::Nonnull<S2Point*> out, const R2Point& point, bool nearest) const = 0;
 
-  // Converts a point from unit space to screen space.
-  virtual R2Point UnitToScreen(const R2Point& point) const = 0;
-
-  // Converts a point from screen space to unit space.
-  virtual R2Point ScreenToUnit(const R2Point&) const = 0;
-
-  // Appends an outline for the projection in screen space to the given sink.
-  //
-  // Does not clear the sink before appending.  The resulting outline is
-  // suitable for filling with a background color for the projection as a whole.
-  virtual void MakeOutline(absl::Nonnull<ChainSink*> out) const = 0;
-
-  // Appends a graticule showing lines of latitude and longitude to a sink.
-  //
-  // Does not clear the sink before appending.
-  virtual void MakeGraticule(absl::Nonnull<ChainSink*> out) const = 0;
 
   // Projects a point from world space to screen space.
   //
   // Returns true if the point is visible on screen, false otherwise.
   virtual bool Project(absl::Nonnull<R2Point*> out, const S2Point&) const = 0;
+
 
   // Transforms a point from screen space back to world space, if possible.
   //
@@ -333,12 +353,14 @@ public:
   virtual bool Unproject(  //
     absl::Nonnull<S2Point *> out, const R2Point& point, bool nearest) const = 0;
 
+
   // Projects an edge from world space to screen space.  The edge is subdivided,
   // respecting the current MaxSqError() and appended to the given ChainSink.
   //
   // Does not clear the sink before appending.  May add breaks to the ChainSink.
   virtual void Project( //
     absl::Nonnull<ChainSink*> out, const S2Shape::Edge& edge) const = 0;
+
 
   // Projects a shape of 0 or 1 dimensions into screen space.  Any edges are
   // subdivided, honoring the current MaxSqError(), and appended to the given
@@ -347,6 +369,7 @@ public:
   // Does not clear the sink before appending.  May add breaks to the ChainSink.
   virtual void Project(  //
     absl::Nonnull<ChainSink*> out, const S2Shape& shape) const = 0;
+
 
   // Projects a polygon into screen space.  0 and 1 dimensional shapes should
   // call Project() above.  Any edges are subdivided, honoring the current
@@ -364,6 +387,7 @@ public:
   virtual void Project(  //
       absl::Nonnull<ChainSink*> out, absl::Nonnull<ChainStitcher*> stitcher,
       const S2Shape&, ContainsPointFn contains) const = 0;
+
 
   // Projects an S2Cap into screen space.  The cap is subdivided, honoring the
   // current MaxSqError() and the resulting points are appended to the given
@@ -395,7 +419,7 @@ protected:
   virtual void UpdateTransforms() {}
 
   // An optional transformation to make to the geometry before rotation.
-  virtual S2Point PreRotate(S2Point point) const = 0;
+  virtual S2Point PreRotate(const S2Point& point) const { return point; }
 
 private:
   // Sets the current transform for the projection.
@@ -457,7 +481,10 @@ public:
   // the unit_scale().
   static constexpr double kNaturalScale = 1.0;
 
-  // Gets and sets the dimensions of screen space.
+  // Size API implementations.
+  //
+  // These are in the Projection class because we need more information from
+  // the derived class to implement them (i.e. aspect ratio and natural scale).
   void    Resize(int width, int height) final;
   double  Width()  const final { return width_;  }
   double  Height() const final { return height_; }
@@ -465,7 +492,9 @@ public:
     return region2(0, 0, Width(), Height());
   }
 
-  double UnitScale() const final { return unit_scale_; }
+  double UnitScale() const final {
+    return unit_scale_;
+  }
 
   R2Point UnitToScreen(const R2Point& p) const final {
     return unit_to_screen_ * p;
@@ -475,7 +504,6 @@ public:
     return screen_to_unit_ * p;
   }
 
-  virtual S2Point PreRotate(S2Point point) const { return point; }
   virtual S2Cap Viewcap() const override;
 
   virtual void Project(absl::Nonnull<ChainSink*> out,

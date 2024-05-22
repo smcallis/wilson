@@ -378,7 +378,6 @@ public:
         S2Point v2 = std::cos(2*2*M_PI/3)*u + std::sin(2*2*M_PI/3)*v;
 
         absl::InlinedVector<S2Point,4> vertices;
-        IProjection::EdgeList clipped;
 
         // S2Shape::Edge edges[] = {{
         //     S2LatLng::FromDegrees(0,0).ToPoint(),
