@@ -174,19 +174,27 @@ private:
       Crossing crossing;
       crossing.vertex = vertex;
       crossing.boundary = boundary;
-      crossing.incoming = true;
+      crossing.direction = +1;
       return crossing;
     }
 
     static Crossing Outgoing(int vertex, uint8_t boundary) {
-      Crossing crossing = Incoming(vertex, boundary);
-      crossing.incoming = false;
+      Crossing crossing;
+      crossing.vertex = vertex;
+      crossing.boundary = boundary;
+      crossing.direction = -1;
       return crossing;
     }
 
+    // Returns true if this is an incoming crossing.
+    bool incoming() const { return direction > 0; }
+
+    // Returns true if this is an outgoing crossing.
+    bool outgoing() const { return direction < 0; }
+
     int vertex;
     uint8_t boundary;
-    bool incoming;
+    char direction;
   };
 
   // A pair of boundary identifiers.
@@ -643,6 +651,12 @@ inline void Equirectangular::Project(absl::Nonnull<ChainSink*> out,
   absl::Nonnull<ChainStitcher*> stitcher,
   const S2Shape& shape, ContainsPointFn contains) const {
 
+  // Adds a chain of vertices to the output.
+  const auto AddChain = [&](absl::Span<const R2Point> vertices) {
+    out->Append(vertices);
+    out->Close();
+  };
+
   // Delegate points and polygons to the other Project().
   if (shape.dimension() != 2) {
     return Project(out, shape);
@@ -723,15 +737,23 @@ inline void Equirectangular::Project(absl::Nonnull<ChainSink*> out,
     }
   }
 
-  // If there's no crossings, the polygon must entirely contain or not contain
-  // the boundary of the projection.  Test the image of the north pole to
-  // determine which.
-  const S2Point north_pole = Unrotate({0, 0, 1});
-  if (crossings.empty() && contains(north_pole)) {
-    MakeOutline(out);
+  // Usually there's no crossings.  The polygon must entirely contain or not
+  // contain the boundary of the projection.  Test the north pole to break the
+  // tie.  If the boundary is contained, emit the outline as a shell first, then
+  // we can emit the polygon chains.
+  if (ABSL_PREDICT_TRUE(crossings.empty())) {
+    if (contains(Unrotate({0, 0, 1}))) {
+      MakeOutline(out);
+    }
+
+    if (!stitcher->EmitChains(AddChain)) {
+      fprintf(stderr, "[Equirectangular] Saw infinite loop splicing chains!\n");
+    }
+    return;
   }
 
-  // Sort crossings CCW around the projection boundary.
+  // Sort crossings CCW around the projection boundary, noting any duplicates.
+  bool duplicates = false;
   absl::c_sort(crossings, [&](const Crossing& a, const Crossing& b) {
     if (a.boundary < b.boundary) return true;
     if (a.boundary > b.boundary) return false;
@@ -740,8 +762,8 @@ inline void Equirectangular::Project(absl::Nonnull<ChainSink*> out,
     const double by = (*stitcher)[b.vertex].y();
 
     if (ay == by) {
-      // Sort by outgoing crossings first.
-      return a.incoming < b.incoming;
+      duplicates = true;
+      return false;
     }
 
     // Crossings should only be on the east and west boundaries.
@@ -755,11 +777,58 @@ inline void Equirectangular::Project(absl::Nonnull<ChainSink*> out,
     }
   });
 
+  if (duplicates) {
+    // Returns the one past the end of the duplicates starting at index.
+    const auto DuplicateEnd = [&](int index) {
+      DCHECK_LT(index, crossings.size());
+      const R2Point& curr = (*stitcher)[crossings[index + 0].vertex];
+
+      int end = index;
+      for (; end < crossings.size(); ++end) {
+        if (curr != (*stitcher)[crossings[end].vertex]) {
+          break;
+        }
+      }
+      return end;
+    };
+
+    // If we have two crossings at -exactly- the same point, we can't order the
+    // crossings by just sorting.  We'll walk around the projection from the
+    // bottom-right corner (the south pole) counter-clockwise.  The crossings
+    // should alternate between incoming and outgoing.
+
+    // This should happen -very- rarely, so we don't have to worry about being
+    // efficient here.  When we run into duplicates then we'll just swap
+    // elements in the duplicate range to make the order consistent.
+    bool outgoing = !contains(Unrotate({0, 0, -1}));
+
+    for (int i = 0; i < crossings.size(); ++i) {
+      if (crossings[i].outgoing() != outgoing) {
+        const int end = DuplicateEnd(i);
+
+        int j = i + 1;
+        for (; j < end; ++j) {
+          if (crossings[j].outgoing() == outgoing) {
+            std::swap(crossings[j], crossings[i]);
+            break;
+          }
+        }
+
+        // This should never happen, but the world is a strange place.
+        if (j == end) {
+          fprintf(stderr, "[Equirectangular] - Couldn't permute crossings!\n");
+          return;
+        }
+      }
+      outgoing = !crossings[i].outgoing();
+    }
+  }
+
   // Now stitch crossings together.
   for (int ii = 0, N = crossings.size(); ii < N; ++ii) {
     // Skip to an outgoing crossing.
     const Crossing& outgoing = crossings[ii];
-    if (outgoing.vertex < 0 || outgoing.incoming) {
+    if (outgoing.vertex < 0 || outgoing.incoming()) {
       continue;
     }
 
@@ -767,7 +836,7 @@ inline void Equirectangular::Project(absl::Nonnull<ChainSink*> out,
     // point, it may not necessarily be the next vertex, but should exist.
     int jj = (ii + 1) % N;
     for (; jj != ii; jj = (jj + 1) % N) {
-      if (outgoing.vertex >= 0 && crossings[jj].incoming) {
+      if (crossings[jj].vertex >= 0 && crossings[jj].incoming()) {
         break;
       }
     }
@@ -811,11 +880,6 @@ inline void Equirectangular::Project(absl::Nonnull<ChainSink*> out,
     }
     stitcher->Connect(last, incoming.vertex);
   }
-
-  const auto AddChain = [&](absl::Span<const R2Point> vertices) {
-    out->Append(vertices);
-    out->Close();
-  };
 
   if (!stitcher->EmitChains(AddChain)) {
     fprintf(stderr, "[Equirectangular] Saw infinite loop splicing chains!\n");
