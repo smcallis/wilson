@@ -828,7 +828,7 @@ inline void Equirectangular::Project(absl::Nonnull<ChainSink*> out,
   for (int ii = 0, N = crossings.size(); ii < N; ++ii) {
     // Skip to an outgoing crossing.
     const Crossing& outgoing = crossings[ii];
-    if (outgoing.vertex < 0 || outgoing.incoming()) {
+    if (outgoing.incoming()) {
       continue;
     }
 
@@ -836,12 +836,15 @@ inline void Equirectangular::Project(absl::Nonnull<ChainSink*> out,
     // point, it may not necessarily be the next vertex, but should exist.
     int jj = (ii + 1) % N;
     for (; jj != ii; jj = (jj + 1) % N) {
-      if (crossings[jj].vertex >= 0 && crossings[jj].incoming()) {
+      if (crossings[jj].incoming()) {
         break;
       }
     }
     DCHECK_NE(ii, jj);
     const Crossing& incoming = crossings[jj];
+
+    DCHECK_GE(outgoing.vertex, 0);
+    DCHECK_GE(incoming.vertex, 0);
 
     // When stitching between the crossings, if the outgoing crossing is on one
     // boundary and the incoming crossing is on the other, we have to stitch
