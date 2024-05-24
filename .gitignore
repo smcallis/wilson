@@ -1,0 +1,9 @@
+# Build directories
+build
+debug
+release
+wasm
+
+.cache
+
+compile_commands.json
