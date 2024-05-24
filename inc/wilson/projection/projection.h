@@ -24,12 +24,14 @@
 #include "s2/r2.h"
 #include "s2/s2cap.h"
 #include "s2/s2cell_union.h"
-#include "s2/s2lax_polyline_shape.h"
+#include "s2/s2edge_crossings.h"
+#include "s2/s2lax_polygon_shape.h"
 #include "s2/s2point.h"
 #include "s2/s2region_coverer.h"
 #include "s2/s2shape.h"
 #include "s2/s2edge_distances.h"
 #include "s2/s2contains_point_query.h"
+#include "s2/s2shapeutil_contains_brute_force.h"
 
 #include "wilson/graphics/pixel.h"
 #include "wilson/chain_sink.h"
@@ -611,56 +613,60 @@ template <typename Derived>
 void Projection<Derived>::Project(absl::Nonnull<ChainSink*> out,
   absl::Nonnull<ChainStitcher*> stitcher, const S2Cap& cap) const {
 
-  ABSL_UNREACHABLE();
+  // Find the center of the cap and vectors defining the plane it lies in.
+  const double base = std::sqrt(1 - std::pow(1 - cap.height(), 2));
+  const S2Point center = cap.center();
+  const S2Point u = base*center.Ortho();
+  const S2Point v = base*center.CrossProd(u).Normalize();
 
-  // Find the center point of the cap and UV vectors forming a basis for points
-  // along the cap boundary.
-  const S2Point center = (1-cap.height())*cap.center();
-  const S2Point u = center.CrossProd({0,0,1}).Normalize();
-  const S2Point v = u.CrossProd(center).Normalize();
-
-  // Get a point on the cap parameterized by angle.
-  const double radius = std::sqrt(1-(1-cap.height())*(1-cap.height()));
-  auto CapPoint = [&](double ang) {
-    return (radius*u)*std::cos(ang) + (radius*v)*std::sin(ang) + center;
+  // Returns a point on the cap parameterized by angle.
+  const S2Point c = (1 - cap.height())*cap.center();
+  auto CapPoint = [&](double angle) {
+    return (u*std::cos(angle) + v*std::sin(angle) + c).Normalize();
   };
 
-  // Subdivide the cap into segments suitable for use as geodesic edges.  Stop
-  // when the edges are short enough that projecting edges to screen space has
-  // acceptable error from the actual cap boundary.
-  std::vector<S2Point> points;
-  const auto SubdivideCap = [&](
-    double a0, S2Point p0, double a1, S2Point p1, auto&& self) -> void {
+  // Returns the error incurred by edge of the given length.
+  const S2Point v0 = CapPoint(0);
+  auto LengthError = [&](double length) {
+    const S2Point mid = S2::Interpolate(v0, CapPoint(length), 0.5);
+    return cap.GetRadius().radians() - S1ChordAngle(mid, center).radians();
+  };
 
-    // Find the midpoint between the two points by interpolating and directly
-    // from the parametric form of the cap boundary defined above.
-    double amid = (a0+a1)/2;
-    S2Point pmid = CapPoint(amid);
-    S2Point interp = S2::Interpolate(p0, p1, 0.5);
+  constexpr double kTargetError = 1e-4;
 
-    // When we project the two different mid points, recurse if they're too far
-    // apart in screen space.
-    R2Point proj0, proj1;
-    Project(&proj0, pmid);
-    Project(&proj1, interp);
-
-    if ((proj0-proj1).Norm2() > MaxSqError()) {
-      self(a0, p0, amid, pmid, self);
-      self(amid, pmid, a1, p1, self);
+  // Do a simple bisection to determine how large a step size we should take.
+  //
+  // Testing indicates that this takes ~7 iterations to converge usually.
+  double step_lo = 1e-9;
+  double step_hi = 2 * M_PI / 3;
+  while (std::fabs(step_hi - step_lo) > .01*step_lo) {
+    const double middle = (step_lo + step_hi) / 2;
+    const double error = LengthError(middle);
+    if (error < kTargetError) {
+      if (error > .90 * kTargetError) {
+        break;
+      }
+      step_lo = middle;
     } else {
-      points.emplace_back(p0);
+      step_hi = middle;
     }
-  };
-
-  // Subdivide quadrants.
-  for (int q=0; q < 4; ++q) {
-    double a0 = (q+0)*M_PI/2;
-    double a1 = (q+1)*M_PI/2;
-    SubdivideCap(a0, CapPoint(a0), a1, CapPoint(a1), SubdivideCap);
   }
-  points.emplace_back(CapPoint(0));
 
-  Project(out, stitcher, S2LaxPolylineShape(points), [](const S2Point& pnt) { return false; });
+  const double step = (step_lo + step_hi) / 2;
+
+  // Generate points around the cap perimeter.
+  std::vector<std::vector<S2Point>> loops;
+  loops.emplace_back();
+
+  for (int i = 0; i < std::floor(2*M_PI/step); ++i) {
+    loops.back().emplace_back(CapPoint(step * i));
+  }
+
+  // And project the result as a regular polygon.
+  const S2LaxPolygonShape shape(std::move(loops));
+  Project(out, stitcher, shape, [&](const S2Point& point) {
+    return s2shapeutil::ContainsBruteForce(shape, point);
+  });
 }
 
 
