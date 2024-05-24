@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "s2/s2edge_crossings.h"
 #include "s2/s2point.h"
 #include "s2/s2shape.h"
 
@@ -98,7 +99,7 @@ inline bool Plane::ClipEdgeOnSphere(S2Shape::Edge& edge) const {
   // origin is always zero.
   const S2Point n0 = normal();
   const S2Point o0 = origin();
-  const S2Point n1 = edge.v0.CrossProd(edge.v1).Normalize();
+  const S2Point n1 = S2::RobustCrossProd(edge.v0, edge.v1).Normalize();
 
   // By the equation of a plane with normal N and origin O, any point P on the
   // plane satisfies N•(P-O) = 0.  Using that equation for both planes, we get
@@ -108,13 +109,19 @@ inline bool Plane::ClipEdgeOnSphere(S2Shape::Edge& edge) const {
 
   // The resulting line must be orthogonal to both planes, so the cross
   // product gives us the direction vector for it.
-  const S2Point D = n0.CrossProd(n1).Normalize();
+  const S2Point D = S2::RobustCrossProd(n0, n1).Normalize();
 
   // Compute the offset of the line segment.  The origin of the plane which the
   // edge lies in is always zero, so we can simplify.
   //   See: https://en.wikipedia.org/wiki/Plane%E2%80%93plane_intersection
   const double nn = n0.DotProd(n1);
   const double h0 = n0.DotProd(o0);
+
+  // Planes are exactly parallel, no intersection.
+  if (1 - nn * nn <= 0) {
+    return false;
+  }
+
   const double den = 1/(1-nn*nn);
   const double c0 = h0*den;
   const double c1 = (-h0*nn)*den;
