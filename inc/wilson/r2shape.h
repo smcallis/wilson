@@ -140,38 +140,6 @@ struct R2Shape : public ChainSink {
     }
   }
 
-  // Adds a new chain that's a closed circle.  The circle is segmented into
-  // lines such that the maximum distance from any given line segment to the
-  // circle is at most tolerance.
-  void AddCircle(R2Point center, double radius, double tolerance=0.25) {
-    // The sagitta of a chord subtending an angle θ is
-    //   h = radius*(1-cos(θ/2))
-    //
-    // Setting h to be our tolerance and solving for θ:
-    //   θ = 2*std::acos(1-h/radius)
-    //
-    // Which is our step size in radians around the circle to achieve the
-    // given tolerance.
-    double theta = 2*std::acos(1-tolerance/radius);
-    double c = std::cos(theta);
-    double s = std::sin(theta);
-
-    // Multiplying to rotate the point will accrue error as it goes, but not
-    // enough to matter during a single rotation around the circle.
-    int steps = std::ceil(2*M_PI/theta);
-
-    Break();
-    R2Point pnt = {radius,0};
-    for (int i=0; i <= steps; ++i) {
-      Append(pnt + center);
-      pnt = {
-        pnt.x()*c - pnt.y()*s,
-        pnt.x()*s + pnt.y()*c
-      };
-    }
-    Break();
-  }
-
   // Return a reference to the underlying path object.
   const BLPath& path() const { return path_; }
   const R2Point* data() const { return
