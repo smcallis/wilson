@@ -61,4 +61,40 @@ class ChainSink {
   }
 };
 
+// Adds a new chain to the sink that's a closed circle.  The circle is segmented
+// into lines such that the maximum distance from any given line segment to the
+// circle is less than `max_error`.
+inline void AppendCircle(absl::Nonnull<ChainSink*> out,  //
+  const R2Point& center, double radius, double max_error) {
+
+  // The sagitta of a chord subtending an angle θ is
+  //
+  //   h = radius*(1-cos(θ/2))
+  //
+  // Setting h to be our max_error and solving for θ:
+  //
+  //   θ = 2*std::acos(1-max_error/radius)
+  //
+  // Which is our step size in radians around the circle.
+  const double step = 2*std::acos(1 - max_error/radius);
+  const double cstep = std::cos(step);
+  const double sstep = std::sin(step);
+
+  // Multiplying repeatedly to rotate the point will accrue error, but not
+  // enough to matter during a single rotation around the circle.
+  const int steps = std::floor(2*M_PI/step);
+
+  out->Break();
+  R2Point pnt = {radius, 0};
+  for (int i=0; i < steps; ++i) {
+    out->Append(center + pnt);
+    pnt = {
+      pnt.x()*cstep - pnt.y()*sstep,
+      pnt.x()*sstep + pnt.y()*cstep
+    };
+  }
+  out->Close();
+}
+
+
 }  // namespace w

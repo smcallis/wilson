@@ -35,6 +35,7 @@
 #include "wilson/projection.h"
 #include "wilson/quaternion.h"
 #include "wilson/r2shape.h"
+#include "wilson/proj/clipping.h"
 
 namespace w {
 
@@ -130,9 +131,14 @@ struct Equirectangular final : Projection<Equirectangular> {
     return true;
   }
 
+  // Projects a point from world space to screen space unconditionally.
+  R2Point Project(const S2Point& point) const override {
+    return UnitToScreen(WorldToUnit(Rotate(PreRotate(point))));
+  }
+
   // Projects a point into screen space.  Returns true if it's visible.
   bool Project(absl::Nonnull<R2Point*> out, const S2Point& point) const override {
-    *out = UnitToScreen(WorldToUnit(Rotate(PreRotate(point))));
+    *out = Project(point);
     return true;  // All points are visible.
   }
 
@@ -195,112 +201,6 @@ private:
     int vertex;
     uint8_t boundary;
     char direction;
-  };
-
-  // A pair of boundary identifiers.
-  struct BoundaryPair {
-    constexpr BoundaryPair()
-      : b0(kNone), b1(kNone) {}
-
-    constexpr BoundaryPair(uint8_t b0, uint8_t b1)
-      : b0(b0), b1(b1) {}
-
-    // Returns a BoundaryPair with only b1 set.
-    static constexpr BoundaryPair Snap1(uint8_t b1) {
-      return BoundaryPair(kNone, b1);
-    }
-
-    // Returns a BoundaryPair with only b0 set.
-    static constexpr BoundaryPair Snap0(uint8_t b0) {
-      return BoundaryPair(b0, kNone);
-    }
-
-    uint8_t b0;
-    uint8_t b1;
-  };
-
-  // There's four possible processing paths for an edge:
-  //
-  //   DROP - The edge isn't visible and can be dropped.
-  //
-  //   KEEP - Keep the edge as-is, it can be subdivided normally.
-  //
-  //   SNAP - One vertex or the other needs to be snapped to a boundary of the
-  //     projection.  One field of boundary will be set with the boundary to
-  //     snap the respective vertex to.
-  //
-  //   CHOP - The edge has to be broken due to wrapping across the anti-meridian
-  //    in this case, isect is set to the intersection point where the edge
-  //    crossed the anti-meridian.  The edge should be broken into two segments:
-  //
-  //      {edge.v0, isect} - with isect snapped to boundary.b0
-  //      {isect, edge.v1} - with isect snapped to boundary.b1
-  //
-  struct ClipResult {
-    enum Status {
-      kKeep, kDrop, kSnap, kChop
-    };
-
-    // Returns a ClipResult indicating that the edge should be kept as-is.
-    static constexpr ClipResult Keep() {
-      return {};
-    }
-
-    // Returns a ClipResult indicating we can drop the edge altogether.
-    static constexpr ClipResult Drop() {
-      return Snap({kNorth, kNorth});
-    }
-
-    // Returns a ClipResult indicating v0 and v1 should be snapped.
-    static constexpr ClipResult Snap(BoundaryPair b) {
-      ClipResult result;
-      result.boundary = b;
-      return result;
-    }
-
-    // Returns a ClipResult indicating v0 should be snapped to the boundary.
-    static constexpr ClipResult Snap0(uint8_t b0) {
-      return ClipResult::Snap(BoundaryPair::Snap0(b0));
-    }
-
-    // Returns a ClipResult indicating v1 should be snapped to the boundary.
-    static constexpr ClipResult Snap1(uint8_t b1) {
-      return ClipResult::Snap(BoundaryPair::Snap1(b1));
-    }
-
-    // Returns a ClipResult indicating the edge must be split in two.
-    static constexpr ClipResult Chop(const S2Point& isect, int dir) {
-      ClipResult result;
-      result.isect = isect;
-      result.boundary.b0 = (dir > 0) ? kEast : kWest;
-      result.boundary.b1 = (dir > 0) ? kWest : kEast;
-      return result;
-    }
-
-    // Returns a status code indicating how to process the edge.
-    Status status() const {
-      // Chop the edge in half.
-      if (isect.has_value()) {
-        return kChop;
-      }
-
-      bool snap = (boundary.b0 != kNone || boundary.b1 != kNone);
-      if (snap) {
-        // If we have two boundaries but they're the same, drop the edge.
-        if (boundary.b0 == boundary.b1) {
-          return kDrop;
-        }
-
-        // They're not the same, snap the vertices.
-        return kSnap;
-      }
-
-      // Keep the edge as-is.
-      return kKeep;
-    }
-
-    std::optional<S2Point> isect;
-    BoundaryPair boundary;
   };
 
   // Projects a point and snaps it to the given boundary, if any.
@@ -534,6 +434,7 @@ private:
     // The edge crossed the anti-meridian.  The signs must be opposite so we can
     // chop the edge into two pieces.
     DCHECK_EQ(sign0, -sign1);
+
     return ClipResult::Chop(isect, sign0 - sign1);
   }
 };
@@ -546,28 +447,33 @@ inline void Equirectangular::Project(absl::Nonnull<ChainSink*> out,
   const S2Shape::Edge& edge) const {
 
   const ClipResult ans = ClipEdge(edge);
-  const uint8_t b0 = ans.boundary.b0;
-  const uint8_t b1 = ans.boundary.b1;
 
   switch (ans.status()) {
     // The edge was dropped, we can just ignore it.
     case ClipResult::kDrop:
       return;
 
-    // The edge was kept as-is, we can just subdivide it normally.a
+    // The edge was kept as-is, we can just subdivide it normally.
     case ClipResult::kKeep:
       Subdivide(out, edge);
       return;
 
     // The edge needs to be chopped in half since it wrapped.
-    case ClipResult::kChop:
+    case ClipResult::kChop: {
+      const uint8_t b0 = ans.direction > 0 ? kEast : kWest;
+      const uint8_t b1 = ans.direction > 0 ? kWest : kEast;
+
       Subdivide(out, {edge.v0, *ans.isect}, BoundaryPair::Snap1(b0));
       out->Break();
       Subdivide(out, {*ans.isect, edge.v1}, BoundaryPair::Snap0(b1));
       return;
+    }
 
     // One or the other vertex needs to be snapped to a boundary.
-    case ClipResult::kSnap:
+    case ClipResult::kSnap: {
+      const uint8_t b0 = ans.boundary.b0;
+      const uint8_t b1 = ans.boundary.b1;
+
       if (b0) {
         DCHECK(!b1);
         out->Break();
@@ -580,6 +486,7 @@ inline void Equirectangular::Project(absl::Nonnull<ChainSink*> out,
         out->Break();
       }
       return;
+    }
   }
   ABSL_UNREACHABLE();
 }
@@ -594,7 +501,9 @@ inline void Equirectangular::Project(  //
     for (int chain = 0; chain < shape.num_chains(); ++chain) {
       for (int i = 0, n = shape.chain(chain).length; i < n; ++i) {
         R2Point proj;
-        Project(&proj, shape.chain_edge(chain, i).v0);
+        if (!Project(&proj, shape.chain_edge(chain, i).v0)) {
+          continue;
+        }
         out->Append(proj);
         out->Break();
       }
@@ -610,8 +519,6 @@ inline void Equirectangular::Project(  //
       const S2Shape::Edge& edge = shape.chain_edge(chain, i);
 
       ClipResult ans = ClipEdge(edge);
-      const uint8_t b0 = ans.boundary.b0;
-      const uint8_t b1 = ans.boundary.b1;
 
       switch (ans.status()) {
         // The edge was dropped, ignore it.
@@ -624,14 +531,21 @@ inline void Equirectangular::Project(  //
           break;
 
         // We have to chop the edge into two pieces.
-        case ClipResult::kChop:
+        case ClipResult::kChop: {
+          const uint8_t b0 = ans.direction > 0 ? kEast : kWest;
+          const uint8_t b1 = ans.direction > 0 ? kWest : kEast;
+
           Subdivide(out, {edge.v0, *ans.isect}, BoundaryPair::Snap1(b0));
           out->Break();
           Subdivide(out, {*ans.isect, edge.v1}, BoundaryPair::Snap0(b1));
           break;
+        }
 
         // We need to snap one vertex or the other.
-        case ClipResult::kSnap:
+        case ClipResult::kSnap: {
+          const uint8_t b0 = ans.boundary.b0;
+          const uint8_t b1 = ans.boundary.b1;
+
           if (b0) {
             DCHECK(!b1);
             Subdivide(out, edge, BoundaryPair::Snap0(b0));
@@ -642,6 +556,7 @@ inline void Equirectangular::Project(  //
             Subdivide(out, edge, BoundaryPair::Snap1(b1));
           }
           break;
+        }
       }
     }
   }
@@ -669,13 +584,11 @@ inline void Equirectangular::Project(absl::Nonnull<ChainSink*> out,
   for (int chain = 0; chain < shape.num_chains(); ++chain) {
     stitcher->Break();
 
-    const int start = stitcher->Next();
+    const int start = stitcher->NextVertex();
     for (int i = 0, n = shape.chain(chain).length; i < n; ++i) {
       const S2Shape::Edge& edge = shape.chain_edge(chain, i);
 
       ClipResult ans = ClipEdge(edge);
-      const uint8_t b0 = ans.boundary.b0;
-      const uint8_t b1 = ans.boundary.b1;
 
       switch (ans.status()) {
         // Edge was dropped, ignore it.
@@ -689,12 +602,15 @@ inline void Equirectangular::Project(absl::Nonnull<ChainSink*> out,
 
         // We have to chop the edge into two pieces.
         case ClipResult::kChop: {
+          const uint8_t b0 = ans.direction > 0 ? kEast : kWest;
+          const uint8_t b1 = ans.direction > 0 ? kWest : kEast;
+
           // Tessellate the first half of the edge.  Snap isect to a boundary.
           Subdivide(stitcher, {edge.v0, *ans.isect}, BoundaryPair::Snap1(b0));
           stitcher->Break();
 
           // Add crossings for the two boundaries we crossed.
-          const int idx = stitcher->Last();
+          const int idx = stitcher->LastVertex();
           crossings.emplace_back(Crossing::Outgoing(idx + 0, b0));
           crossings.emplace_back(Crossing::Incoming(idx + 1, b1));
 
@@ -705,9 +621,12 @@ inline void Equirectangular::Project(absl::Nonnull<ChainSink*> out,
 
         // We need to snap one vertex or the other.
         case ClipResult::kSnap: {
+          const uint8_t b0 = ans.boundary.b0;
+          const uint8_t b1 = ans.boundary.b1;
+
           if (b0) {
             DCHECK(!b1);
-            const int next = stitcher->Next();
+            const int next = stitcher->NextVertex();
             Subdivide(stitcher, edge, BoundaryPair::Snap0(b0));
 
             // Don't add crossings for the poles.
@@ -722,7 +641,8 @@ inline void Equirectangular::Project(absl::Nonnull<ChainSink*> out,
 
             // Don't add crossings for the poles.
             if (IsEastWest(b1)) {
-              crossings.push_back(Crossing::Outgoing(stitcher->Last(), b1));
+              crossings.push_back(  //
+                Crossing::Outgoing(stitcher->LastVertex(), b1));
             }
           }
           break;
@@ -733,7 +653,7 @@ inline void Equirectangular::Project(absl::Nonnull<ChainSink*> out,
     // If the chain closed, remove the repeat point and connect to the start.
     if (stitcher->Size() > start && stitcher->Back() == (*stitcher)[start]) {
       stitcher->PopBack();
-      stitcher->Connect(stitcher->Last(), start);
+      stitcher->Connect(stitcher->LastVertex(), start);
     }
   }
 
@@ -778,7 +698,7 @@ inline void Equirectangular::Project(absl::Nonnull<ChainSink*> out,
   });
 
   if (duplicates) {
-    // Returns the one past the end of the duplicates starting at index.
+    // Returns one past the end of the duplicate points starting at index.
     const auto DuplicateEnd = [&](int index) {
       DCHECK_LT(index, crossings.size());
       const R2Point& curr = (*stitcher)[crossings[index + 0].vertex];
@@ -827,10 +747,10 @@ inline void Equirectangular::Project(absl::Nonnull<ChainSink*> out,
   // Now stitch crossings together.
   for (int ii = 0, N = crossings.size(); ii < N; ++ii) {
     // Skip to an outgoing crossing.
-    const Crossing& outgoing = crossings[ii];
-    if (outgoing.incoming()) {
+    if (crossings[ii].incoming()) {
       continue;
     }
+    const Crossing& outgoing = crossings[ii];
 
     // Find the next incoming crossing.  Since vertices can land on the same
     // point, it may not necessarily be the next vertex, but should exist.
@@ -879,7 +799,7 @@ inline void Equirectangular::Project(absl::Nonnull<ChainSink*> out,
     for (int corner : corners) {
       stitcher->Break();
       stitcher->Append(outline_.GetVertex(corner));
-      last = stitcher->Connect(last, stitcher->Last());
+      last = stitcher->Connect(last, stitcher->LastVertex());
     }
     stitcher->Connect(last, incoming.vertex);
   }

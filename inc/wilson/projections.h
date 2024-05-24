@@ -20,7 +20,7 @@
 //#include "wilson/proj/cubic.h"
 #include "wilson/proj/equirectangular.h"
 // #include "wilson/proj/gnomonic.h"
-// #include "wilson/proj/orthographic.h"
+#include "wilson/proj/orthographic.h"
 
 ABSL_FLAG(bool, experimental_projections, false, "Enable experimental projections");
 
@@ -54,7 +54,7 @@ static const ProjectionInfo kProjectionList[] = {
 //  ProjectionInfo::Create<Cubic>("Cubic", false),
   ProjectionInfo::Create<Equirectangular>("Equirectangular", false),
   // ProjectionInfo::Create<Gnomonic>("Gnomonic", false),
-  // ProjectionInfo::Create<Orthographic>("Orthographic", false)
+  ProjectionInfo::Create<Orthographic>("Orthographic", false)
 };
 
 // Calls a function with each configured projection's ProjectionInfo entry.

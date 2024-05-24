@@ -54,10 +54,10 @@ class ChainStitcher : public ChainSink {
       return;
     }
 
+    // If the tail is a repeat of the head, pop the tail before connecting.
     if (tail_ > head_ && nodes_[tail_] == nodes_[head_]) {
       PopBack();
     }
-
     Connect(tail_, head_);
     Break();
   }
@@ -93,12 +93,12 @@ class ChainStitcher : public ChainSink {
   }
 
   // Returns the index of the last vertex (may be kUnconnected if there is none.
-  int Last() const {
+  int LastVertex() const {
     return Size() - 1;
   }
 
   // Returns the index the next vertex added will have.
-  int Next() const {
+  int NextVertex() const {
     return Size();
   }
 

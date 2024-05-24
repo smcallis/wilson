@@ -336,6 +336,9 @@ public:
     absl::Nonnull<S2Point*> out, const R2Point& point, bool nearest) const = 0;
 
 
+  // Projects a point from world space to screen space unconditionally.
+  virtual R2Point Project(const S2Point&) const = 0;
+
   // Projects a point from world space to screen space.
   //
   // Returns true if the point is visible on screen, false otherwise.
