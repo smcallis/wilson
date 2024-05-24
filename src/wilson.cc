@@ -41,6 +41,7 @@
 #include "s2/s2shapeutil_coding.h"
 #include "s2/mutable_s2shape_index.h"
 #include "s2/s2region_coverer.h"
+#include "s2/s2text_format.h"
 #include "s2/s2shape_index_region.h"
 #include "s2/util/bitmap/bitmap.h"
 #include "s2/util/coding/coder.h"
@@ -48,18 +49,18 @@
 // Project requirements
 #include "wilson/generated/land.h"
 #include "wilson/graphics/inset.h"
-#include "wilson/graphics/pixbuffer.h"
-#include "wilson/graphics/sdlapp.h"
-#include "wilson/gui/colors.h"
 #include "wilson/graticule.h"
-#include "wilson/projection/equirectangular.h"
-#include "wilson/projection/all.h"
 #include "wilson/quaternion.h"
 #include "wilson/simplify.h"
 #include "wilson/sierpinski.h"
 #include "wilson/strutil.h"
 #include "wilson/timing.h"
 #include "wilson/transform.h"
+#include "wilson/graphics/pixbuffer.h"
+#include "wilson/graphics/sdlapp.h"
+#include "wilson/gui/colors.h"
+#include "wilson/projection/equirectangular.h"
+#include "wilson/projection/all.h"
 
 #include "third_party/dash.h"
 #include "third_party/monomath.h"
@@ -125,7 +126,19 @@ public:
   // updates can be coalesced and reified here when they're needed rather than
   // immediately.
   void OnFrame(double elapsed) override {
-    ImGui_ImplSDL2_NewFrame();
+    // angle_ += M_PI / 6 * elapsed;
+    // while (angle_ > 2 * M_PI) {
+    //   angle_ -= 2 * M_PI;
+    // }
+
+    // // Quaternion rotation(Vector3_d(3, -7, 0).Normalize(), angle_);
+    // // Quaternion rotation(Vector3_d(0, -1, 0).Normalize(), angle_);
+    // Quaternion rotation(Vector3_d(+1, 0, 0).Normalize(), angle_);
+    // projection_->SetRotation(rotation);
+    // inset_.SetRotation(rotation);
+    // dirty_.SetAll(true);
+
+    ImGui_ImplSDL2_NewFrame();  //
     ImGui_ImplSDLRenderer2_NewFrame();
     ImGui::NewFrame();
 
@@ -201,7 +214,7 @@ public:
           EachProjection([&](const ProjectionInfo& info) {
             if (ImGui::Selectable(info.name.data())) {
               projection_ = info.factory(
-                projection_->rotation(), projection_->scale());
+                projection_->Rotation(), projection_->Scale());
               Resize();
             }
           });
@@ -259,6 +272,7 @@ public:
     ctx.begin(texture_.image());
 
     // Clear the on-screen outline of the sphere.
+    outline_.Clear();
     projection_->MakeOutline(&outline_);
     ctx.setFillStyle(bg_color_);
     ctx.fillPath(outline_.path());
@@ -310,13 +324,16 @@ public:
           ctx.setStrokeWidth(stroke_width_);
 
           timeit("reproject", "Time to reproject out of date geometry", [&]() {
-            for (int shape_id : shapes) {
+            for (int shape_id : shapes)
+            //int shape_id = 0;
+            {
               ProjectedShape& pair = projected_shapes_[shape_id];
               if (dirty_.Get(shape_id)) {
                 dirty_.Set(shape_id, false);
 
                 pair.r2shape.Clear();
-                projection_->Project(&pair.r2shape, &chain_stitcher_, *pair.s2shape);
+                projection_->Project(&pair.r2shape, &chain_stitcher_,
+                                     *pair.s2shape, IndexedContains(*index_, shape_id));
 
                 R2Shape simplified;
                 Simplify(&simplified, pair.r2shape);
@@ -401,27 +418,27 @@ public:
         //   }
         // }
 
-        printf("\n");
-        S2Shape::Edge edges[] = {{v0,v1}, {v1,v2}, {v2,v0}};
-        int i=0;
-        for (const S2Shape::Edge& edge : edges) {
-          printf("piece %d\n", ++i);
+        // printf("\n");
+        // S2Shape::Edge edges[] = {{v0,v1}, {v1,v2}, {v2,v0}};
+        // int i=0;
+        // for (const S2Shape::Edge& edge : edges) {
+        //   printf("piece %d\n", ++i);
 
-          IProjection::EdgeList edges;
-          for (S2Shape::Edge clip : projection_->Clip(&edges, edge)) {
-            if (flip) {
-              clip.v0 = -clip.v0;
-              clip.v1 = -clip.v1;
-            }
-            // printf("  clip: %f %f %f  %f %f %f\n",
-            //   clip.v0.x(), clip.v0.y(), clip.v0.z(),
-            //   clip.v1.x(), clip.v1.y(), clip.v1.z());
+        //   IProjection::EdgeList edges;
+        //   for (S2Shape::Edge clip : projection_->Clip(&edges, edge)) {
+        //     if (flip) {
+        //       clip.v0 = -clip.v0;
+        //       clip.v1 = -clip.v1;
+        //     }
+        //     // printf("  clip: %f %f %f  %f %f %f\n",
+        //     //   clip.v0.x(), clip.v0.y(), clip.v0.z(),
+        //     //   clip.v1.x(), clip.v1.y(), clip.v1.z());
 
-            projection_->Subdivide(&shape, clip, 0.25);
-            shape.EndChain();
-            //clipped.emplace_back(clip);
-          }
-        }
+        //     projection_->Subdivide(&shape, clip, 0.25);
+        //     shape.EndChain();
+        //     //clipped.emplace_back(clip);
+        //   }
+        // }
 
         // if (clipped.empty()) {
         //   return;
@@ -518,7 +535,7 @@ public:
       shape.Clear();
       AddGreatCircle(normal, true);
 
-      if (!shape.empty()) {
+      if (!shape.Empty()) {
         std::vector<double> pt_nodes_x;
         std::vector<double> pt_nodes_y;
         for (int i=0; i < shape.nchains(); ++i) {
@@ -584,17 +601,15 @@ public:
       //     S2LatLng(pnt).lng().degrees(), pnt.x(), pnt.y(), pnt.z()
       //   ));
 
-      R2Point pnts = projection_->Project(pnt);
-      ctx.setFillStyle(BLRgba32(0xFFCC8899u));
-      ctx.fillCircle(pnts.x(), pnts.y(), 3.0);
+      R2Point proj;
+      if (projection_->Project(&proj, pnt)) {
+        ctx.setFillStyle(BLRgba32(0xFFCC8899u));
+        ctx.fillCircle(proj.x(), proj.y(), 3.0);
+      }
 
       if (draw_rule_) {
         R2Shape shape;
-        IProjection::EdgeList edges;
-        for (const auto& edge : projection_->Clip(&edges, {rule_start_, pnt})) {
-          projection_->Subdivide(&shape, edge, 0.25);
-          shape.EndChain();
-        }
+        projection_->Project(&shape, {rule_start_, pnt});
 
         ctx.setStrokeStyle(pixel(0xaa64389f));
         ctx.setStrokeWidth(3);
@@ -691,6 +706,10 @@ public:
       if (event.key.keysym.sym == SDLK_ESCAPE) {
         RequestQuit();
       }
+
+      if (event.key.keysym.sym == SDLK_UP) {
+        angle_ += .1;
+      }
       return;
     }
 
@@ -698,7 +717,7 @@ public:
     // lets us find rotations relative to a starting reference frame.
     const auto Unproject = [&](S2Point& out, R2Point pnt, Quaternion rot) {
       projection_->PushTransform();
-      projection_->set_rotation(rot);
+      projection_->SetRotation(rot);
       bool hit = projection_->Unproject(&out, pnt);
       projection_->PopTransform();
       return hit;
@@ -708,7 +727,7 @@ public:
     if (event.type == SDL_MOUSEWHEEL) {
       S2Point prev, curr;
       if (projection_->Unproject(&prev, mouse_)) {
-        double scale = projection_->scale();
+        double scale = projection_->Scale();
 
         // Be sure to use .preciseY here because when compiling for WASM
         // browsers often hold the wheel position as floating point, so if we
@@ -718,7 +737,7 @@ public:
         scale = std::min(std::max(scale, kMinScale), kMaxScale);
 
         // Adjust the projection with the new scale.
-        projection_->set_scale(scale);
+        projection_->SetScale(scale);
         dirty_.SetAll(true);
 
         // Grab the new point under the mouse (if any) and rotate the old
@@ -726,9 +745,9 @@ public:
         // we're zooming in-and-out around the mouse point.
         if (projection_->Unproject(&curr, mouse_)) {
           Quaternion rotation(prev, curr);
-          rotation *= projection_->rotation();
+          rotation *= projection_->Rotation();
 
-          projection_->set_rotation(rotation);
+          projection_->SetRotation(rotation);
           inset_.SetRotation(rotation);
         }
       }
@@ -739,7 +758,7 @@ public:
       if (event.button.button == SDL_BUTTON_LEFT) {
         if (!dragging_ && projection_->Unproject(&mouse_start_, mouse_)) {
           dragging_ = true;
-          rot_start_ = projection_->rotation();
+          rot_start_ = projection_->Rotation();
         }
       }
       return;
@@ -759,7 +778,7 @@ public:
             if (Unproject(current, mouse_, rot_start_)) {
               // Compose final rotation.
               auto rotation = Quaternion(mouse_start_, current)*rot_start_;
-              projection_->set_rotation(rotation);
+              projection_->SetRotation(rotation);
               inset_.SetRotation(rotation);
               dirty_.SetAll(true);
             }
@@ -790,7 +809,7 @@ public:
           S2Point current;
           if (Unproject(current, mouse_, rot_start_)) {
             auto rotation = Quaternion(mouse_start_, current)*rot_start_;
-            projection_->set_rotation(rotation);
+            projection_->SetRotation(rotation);
             inset_.SetRotation(rotation);
             dirty_.SetAll(true);
           }
@@ -922,7 +941,7 @@ private:
   util::bitmap::Bitmap64 dirty_;
 
   bool show_sidebar_ = false;
-
+  double angle_ = 1.740043031169582699;
   // Drawing context for 2D graphics.
   BLContext context_;
   Pixbuffer texture_;
@@ -982,6 +1001,25 @@ int main(int argc, char* argv[]) {
 
   Wilson wilson(1024, 1024, "Wilson");
 
+  //auto index = s2textformat::MakeIndexOrDie("## 1:-40, 1:40, 40:0");
+  S2Polygon fractal = Sierpinski(6, false);
+
+  // auto index = s2textformat::MakeIndexOrDie(
+  //   "## 41.643516896669674:-144.77627950461175,42.94370748528561:-43.87784200461175,42.94370748528561:57.37215799538825,41.90570152627342:163.54403299538825,25.96218157501415:-162.7059670046117,16.4721071207355:163.54403299538825,2.640384861525707:-165.1669045046117,-12.378434176571048:162.84090799538825,-28.454987792176478:-162.3544045046117,-41.415262067488264:158.62215799538825,-56.10063597597255:-154.9715920046117");
+
+  // Mr. Friendly.  Does not contain the poles.
+  auto index = s2textformat::MakeIndexOrDie(
+    "## 14.218719424393095:-139.04493922809414,22.874523271599866:-160.84181422809414,-3.209494247301447:-138.69337672809414,8.360560091398495:-162.95118922809414,-17.353660502031545:-136.23243922809414,-8.801354410789957:-160.84181422809414,-25.842299026955686:-134.12306422809414,-24.569987918626186:-159.78712672809414,-35.78473924572461:-139.04493922809414,-36.91729573578281:-157.67775172809414,-44.6240076404484:-138.6177252890106,-45.86161710843011:-162.1724127890106,-50.319429809809975:-146.7036627890106,-51.64725873602859:-78.14897528901061,-49.64122759535099:12.202587210989394,-50.543375122592195:109.58539971098939,-54.190008075990896:157.39789971098938,-51.42858864582373:-153.38335028901054,-39.132516286175175:168.29633721098938,-42.067957244234535:-154.43803778901054,-26.15827993925154:167.24164971098938,-33.47074915461003:-154.78960028901054,-10.534132882777719:167.94477471098938,-21.660370875972657:-154.43803778901054,8.360560091398495:166.18696221098938,-6.01260805092413:-154.78960028901054,23.198050611199644:166.18696221098938,13.194081901557816:-157.25053778901054,38.23569318555331:164.42914971098938,25.44041544526596:-154.43803778901054,50.033939944397154:107.47602471098939,52.880480514013065:9.843435709163883,54.134841473590974:-81.91437679083612,53.09212268552355:-168.04718929083612");
+
+// Mr. Friendly's Reverse.  Does contain the poles.
+//   auto index = s2textformat::MakeIndexOrDie(
+// "## 53.09212268552355:-168.04718929083612,54.134841473590974:-81.91437679083612,52.880480514013065:9.843435709163883,50.033939944397154:107.47602471098939,25.44041544526596:-154.43803778901054,38.23569318555331:164.42914971098938,13.194081901557816:-157.25053778901054,23.198050611199644:166.18696221098938,-6.01260805092413:-154.78960028901054,8.360560091398495:166.18696221098938,-21.660370875972657:-154.43803778901054,-10.534132882777719:167.94477471098938,-33.47074915461003:-154.78960028901054,-26.15827993925154:167.24164971098938,-42.067957244234535:-154.43803778901054,-39.132516286175175:168.29633721098938,-51.42858864582373:-153.38335028901054,-54.190008075990896:157.39789971098938,-50.543375122592195:109.58539971098939,-49.64122759535099:12.202587210989394,-51.64725873602859:-78.14897528901061,-50.319429809809975:-146.7036627890106,-45.86161710843011:-162.1724127890106,-44.6240076404484:-138.6177252890106,-36.91729573578281:-157.67775172809414,-35.78473924572461:-139.04493922809414,-24.569987918626186:-159.78712672809414,-25.842299026955686:-134.12306422809414,-8.801354410789957:-160.84181422809414,-17.353660502031545:-136.23243922809414,8.360560091398495:-162.95118922809414,-3.209494247301447:-138.69337672809414,22.874523271599866:-160.84181422809414,14.218719424393095:-139.04493922809414");
+
+
   wilson.AddIndex(GetLandIndex());
+  //wilson.AddIndex(*index);
+  //wilson.AddIndex(fractal.index());
+
+  //wilson.set_tick_rate(2);
   wilson.Run();
 }
