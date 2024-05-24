@@ -85,12 +85,12 @@ struct ClipResult {
   }
 
   // Returns a ClipResult indicating v0 should be snapped to the boundary.
-  static constexpr ClipResult Snap0(uint8_t b0) {
+  static constexpr ClipResult Snap0(uint8_t b0 = 1) {
     return ClipResult::Snap(BoundaryPair::Snap0(b0));
   }
 
   // Returns a ClipResult indicating v1 should be snapped to the boundary.
-  static constexpr ClipResult Snap1(uint8_t b1) {
+  static constexpr ClipResult Snap1(uint8_t b1 = 1) {
     return ClipResult::Snap(BoundaryPair::Snap1(b1));
   }
 
