@@ -19,22 +19,23 @@
 // External requirements
 #include "absl/container/flat_hash_set.h"
 #include "blend2d.h"
+#include "blend2d/context.h"
 #include "s2/s2cell_iterator_join.h"
 #include "s2/s2polygon.h"
 #include "s2/s2shapeutil_coding.h"
 #include "s2/util/coding/coder.h"
 
 // Project requirements
-#include "wilson/generated/land_simplified.h"
-#include "wilson/graphics/pixbuffer.h"
 #include "wilson/chain_stitcher.h"
 #include "wilson/graticule.h"
-#include "wilson/projection.h"
-#include "wilson/projections.h"
 #include "wilson/quaternion.h"
 #include "wilson/region.h"
 #include "wilson/simplify.h"
 #include "wilson/timing.h"
+
+#include "wilson/generated/land_simplified.h"
+#include "wilson/graphics/pixbuffer.h"
+#include "wilson/projection/all.h"
 
 // An inset globe that can be drawn to show the current viewport.
 namespace w {
@@ -59,7 +60,7 @@ public:
 
   // Sets the rotation value for the inset.
   void SetRotation(const Quaternion& rotation) {
-    projection_->set_rotation(rotation);
+    projection_->SetRotation(rotation);
   }
 
   // Sets the position of the top-left corner of the inset.
@@ -75,6 +76,19 @@ public:
 
   // Redraws the inset, highlighting information from the active projection.
   void Redraw(BLContext& ctx, const IProjection& projection) {
+    const S2ShapeIndex& index = internal::GetSimplifiedLandIndex();
+
+    S2ContainsPointQuery<S2ShapeIndex>::Options options;
+    options.set_vertex_model(S2VertexModel::CLOSED);
+    S2ContainsPointQuery<S2ShapeIndex> query(&index, options);
+
+    // Returns a function that can test point containment in the given shape.
+    const auto ShapeContainsFn = [&](const S2Shape& shape) {
+      return [&](const S2Point& point) {
+        return query.ShapeContains(shape, point);
+      };
+    };
+
     // Draw to the texture pixbuffer using a new context.
     projection_->MakeOutline(&outline_);
     {
@@ -92,9 +106,9 @@ public:
 
       timeit("fill", "Time to fill land", [&]() {
         r2shape_.Clear();
-        const S2ShapeIndex& index = internal::GetSimplifiedLandIndex();
         for (const S2Shape* shape : index) {
-          projection_->Project(&r2shape_, &chain_stitcher_, *shape);
+          projection_->Project(
+            &r2shape_, &chain_stitcher_, *shape, ShapeContainsFn(*shape));
         }
 
         Simplify(&simplified_, r2shape_);
@@ -112,36 +126,40 @@ public:
         }
       });
 
-      ctx.setFillStyle(pixel(0x77e34234));
-
       // Convert the viewport into a polygon.  Note we have to check whether the
       // output polygon has significantly less area than the cell union and flip
       // it because it doesn't maintain orientation for very full cell unions.
       r2shape_.Clear();
       for (S2CellId cell : projection.Viewport()) {
         S2Polygon polygon{S2Cell(cell)};
-        projection_->Project(&r2shape_, &chain_stitcher_,
-                             S2Polygon::Shape(&polygon),
-          [&](const S2Point& point) { return polygon.Contains(point); });
+
+        projection_->Project(
+            &r2shape_, &chain_stitcher_, S2Polygon::Shape(&polygon),
+            [&](const S2Point& point) { return polygon.Contains(point); });
       }
 
-      ctx.setStrokeStyle(pixel(0x77800000));
-      ctx.setStrokeWidth(1);
+      ctx.setFillStyle(pixel(0x77e34234));
       ctx.fillPath(r2shape_.path());
 
-      // Draw the viewcap outline.
-      r2shape_.Clear();
-      ctx.setStrokeStyle(pixel(0xff00316e));
-      ctx.setStrokeWidth(1);
+      // Draw the viewcap outline.  If it gets very close to 90 degrees, then
+      // thicken the stroke so we don't get ugly drawing near the boundary.
+      const S2Cap cap = projection.Viewcap();
+      double width = 1;
+      if (M_PI / 2 - cap.radius().radians() < 1e-3) {
+        width = 2;
+      }
 
-      projection_->Project(&r2shape_, &chain_stitcher_, projection.Viewcap(), 0.1);
+      ctx.setStrokeStyle(pixel(0xff00316e));
+      ctx.setStrokeWidth(width);
+
+      r2shape_.Clear();
+      projection_->Project(&r2shape_, &chain_stitcher_, cap);
       ctx.strokePath(r2shape_.path());
     }
 
     // Refill the outline using the texture as a source, this will remove any
     // overdraw or slight numerical error from the edges of the projection.
     BLPattern texture(texture_.image());
-    ctx.restore();
     ctx.save();
     ctx.setCompOp(BL_COMP_OP_SRC_COPY);
     ctx.setFillStyle(texture);
