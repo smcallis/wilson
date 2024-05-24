@@ -38,7 +38,6 @@
 #include "wilson/r2shape.h"
 #include "wilson/region.h"
 #include "wilson/transform.h"
-#include "wilson/projector.h"
 
 namespace w {
 

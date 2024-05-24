@@ -15,12 +15,12 @@
 // limitations under the License.
 
 #include "absl/flags/flag.h"
-#include "wilson/projection.h"
 
-//#include "wilson/proj/cubic.h"
-#include "wilson/proj/equirectangular.h"
-// #include "wilson/proj/gnomonic.h"
-#include "wilson/proj/orthographic.h"
+#include "wilson/projection/projection.h"
+//#include "wilson/projection/cubic.h"
+#include "wilson/projection/equirectangular.h"
+// #include "wilson/projection/gnomonic.h"
+#include "wilson/projection/orthographic.h"
 
 ABSL_FLAG(bool, experimental_projections, false, "Enable experimental projections");
 

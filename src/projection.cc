@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "wilson/projection.h"
+#include "wilson/projection/projection.h"
 
 #include "s2/s2cap.h"
 #include "s2/s2region.h"

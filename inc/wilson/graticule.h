@@ -17,7 +17,7 @@
 #include "blend2d.h"
 #include "s2/s2cell.h"
 
-#include "wilson/projection.h"
+#include "wilson/projection/projection.h"
 #include "wilson/plane.h"
 
 namespace w {
@@ -120,4 +120,4 @@ inline R2Shape S2Graticule(const IProjection& proj, int level) {
   return out;
 }
 
-} // namespace w
+ } // namespace w

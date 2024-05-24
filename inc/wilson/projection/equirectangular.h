@@ -32,10 +32,10 @@
 #include "s2/s2wedge_relations.h"
 
 #include "wilson/plane.h"
-#include "wilson/projection.h"
 #include "wilson/quaternion.h"
 #include "wilson/r2shape.h"
-#include "wilson/proj/clipping.h"
+#include "wilson/projection/clipping.h"
+#include "wilson/projection/projection.h"
 
 namespace w {
 
