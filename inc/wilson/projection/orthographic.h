@@ -48,7 +48,9 @@ struct Orthographic final : Projection<Orthographic> {
   }
 
   S2Cap Viewcap() const override {
-    S1ChordAngle radius = S1ChordAngle::Right();
+    // Note we cheat here and return a little less than 90 degrees to avoid
+    // drawing the cap -exactly- on the clip horizon.
+    S1ChordAngle radius = S1ChordAngle::Degrees(90 - 1e-6);
 
     S2Point corner;
     if (Unproject(&corner, Screen().GetVertex(0))) {
@@ -302,22 +304,29 @@ protected:
     }
 
     // The vertex signs are different.  If either vertex is exactly on the nadir
-    // plane, then keep the edge if the other vertex is positive.
+    // plane, then mark it as needing snapped on the given vertex.
     if (sign0 == 0) {
-      return (sign1 > 0) ? ClipResult::Keep() : ClipResult::Drop();
+      if (sign1 > 0) {
+        return ClipResult::Snap0();
+      }
+      return ClipResult::Drop();
     }
 
     if (sign1 == 0) {
-      return (sign0 > 0) ? ClipResult::Keep() : ClipResult::Drop();
+      if (sign0 > 0) {
+        return ClipResult::Snap1();
+      }
+      return ClipResult::Drop();
     }
 
     // Signs are different and neither one is zero, so the combination must be
     // (+, -) or (-, +).
-    S2Point cross = S2::RobustCrossProd(edge.v0, edge.v1);
-    S2Point isect = cross.CrossProd(Nadir()).Normalize();
+    S2Point cross = S2::RobustCrossProd(edge.v0, edge.v1).Normalize();
+    S2Point isect = S2::RobustCrossProd(cross, Nadir()).Normalize();
     if (sign1 - sign0 > 0) {
       isect = -isect;
     }
+
     return ClipResult::Chop(isect, sign1 - sign0);
   }
 
@@ -500,6 +509,21 @@ inline void Orthographic::Project(absl::Nonnull<ChainSink*> out,
       return;
     }
 
+      // One or the other vertex needs to be snapped to a boundary.
+    case ClipResult::kSnap: {
+      if (ans.boundary.b0) {  // incoming
+        out->Break();
+        Subdivide(out, edge);
+      }
+
+      if (ans.boundary.b1) {  // outgoing
+        Subdivide(out, edge);
+        out->Break();
+      }
+
+      break;
+    }
+
     default:
       ABSL_UNREACHABLE();
   }
@@ -559,6 +583,21 @@ inline void Orthographic::Project(  //
           break;
         }
 
+        // One or the other vertex needs to be snapped to a boundary.
+        case ClipResult::kSnap: {
+          if (ans.boundary.b0) {  // incoming
+            out->Break();
+            Subdivide(out, edge);
+          }
+
+          if (ans.boundary.b1) {  // outgoing
+            Subdivide(out, edge);
+            out->Break();
+          }
+
+          break;
+        }
+
         default:
           ABSL_UNREACHABLE();
       }
@@ -592,31 +631,30 @@ inline void Orthographic::Project(absl::Nonnull<ChainSink*> out,
   // setting `complement` to true.  This is particularly useful if the start and
   // end points are equal and we want to stitch the entire circle.
   const auto Stitch = [&](const S2Shape::Edge& edge, bool complement = false) {
-    const double kSplitThreshold = 0.95 * M_PI;
+    // Split at slightly less than 180 degrees to avoid numerical issues.
+    constexpr double kSplitThreshold = 0.95 * M_PI;
 
     // Find the oriented angle between the vertices around the nadir() vector.
-    const double dab = edge.v0.DotProd(edge.v1);
-    const double xab = edge.v0.CrossProd(edge.v1).Norm();
-
-    double angle = std::atan2(xab, dab);
+    double angle = edge.v0.Angle(edge.v1);
     if (complement || s2pred::Sign(Nadir(), edge.v0, edge.v1) < 0) {
       angle = 2*M_PI - angle;
     }
 
     if (angle >= kSplitThreshold) {
       const S2Point u = edge.v0;
-      const S2Point v = Nadir().CrossProd(u);
+      const S2Point v = S2::RobustCrossProd(Nadir(), u).Normalize();
 
+      angle /= 3;
       const S2Point a = edge.v0;
-      const S2Point b = u*std::cos(1*angle/3) + v*std::sin(1*angle/3);
-      const S2Point c = u*std::cos(2*angle/3) + v*std::sin(2*angle/3);
+      const S2Point b = (u*std::cos(1*angle) + v*std::sin(1*angle)).Normalize();
+      const S2Point c = (u*std::cos(2*angle) + v*std::sin(2*angle)).Normalize();
       const S2Point d = edge.v1;
 
       Subdivide(stitcher, {a, b});
       Subdivide(stitcher, {b, c});
       Subdivide(stitcher, {c, d});
     } else {
-      Subdivide(stitcher, {edge.v0, edge.v1});
+      Subdivide(stitcher, edge);
     }
   };
 
@@ -645,6 +683,7 @@ inline void Orthographic::Project(absl::Nonnull<ChainSink*> out,
           if (ans.direction < 0) {  // outgoing
             Subdivide(stitcher, {edge.v0, *ans.isect});
             stitcher->Break();
+
             crossings.push_back(  //
               Crossing::Outgoing(*ans.isect, stitcher->LastVertex()));
           }
@@ -652,9 +691,32 @@ inline void Orthographic::Project(absl::Nonnull<ChainSink*> out,
           if (ans.direction > 0) {  // incoming
             crossings.push_back(  //
               Crossing::Incoming(*ans.isect, stitcher->NextVertex()));
+
+            stitcher->Break();
             Subdivide(stitcher, {*ans.isect, edge.v1});
           }
           break;
+
+        // One or the other vertex needs to be snapped to a boundary.
+        case ClipResult::kSnap: {
+          if (ans.boundary.b0) {  // incoming
+            crossings.push_back(  //
+              Crossing::Incoming(edge.v0, stitcher->NextVertex()));
+
+            stitcher->Break();
+            Subdivide(stitcher, edge);
+          }
+
+          if (ans.boundary.b1) {  // outgoing
+            Subdivide(stitcher, edge);
+            stitcher->Break();
+
+            crossings.push_back(  //
+              Crossing::Outgoing(edge.v1, stitcher->LastVertex()));
+          }
+
+          break;
+        }
 
         default:
           ABSL_UNREACHABLE();
@@ -756,8 +818,10 @@ inline void Orthographic::Project(absl::Nonnull<ChainSink*> out,
 
     // Subdivide the stitch since it's a geodesic edge.
     const int start = stitcher->NextVertex();
-    stitcher->Break();
-    Stitch({outgoing.point, incoming.point});
+    if (outgoing.point != incoming.point) {
+      stitcher->Break();
+      Stitch({outgoing.point, incoming.point});
+    }
 
     // And splice the subdivided edge into the loop.
     if (stitcher->Size() - start == 0) {
