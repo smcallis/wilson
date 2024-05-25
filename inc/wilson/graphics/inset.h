@@ -90,6 +90,7 @@ public:
     };
 
     // Draw to the texture pixbuffer using a new context.
+    outline_.Clear();
     projection_->MakeOutline(&outline_);
     {
       BLContext ctx;
@@ -99,20 +100,24 @@ public:
       texture_.clear(pixel(0x77000000));
 
       // Clear the on-screen outline of the sphere.
-      ctx.setFillStyle(pixel(0xffe6ecee));
-      ctx.fillPath(outline_.path());
+      timeit("fill", "Time to fill geometry", [&]() {
+        timeit("outline", "Time to fill outline", [&]() {
+          ctx.setFillStyle(pixel(0xffe6ecee));
+          ctx.fillPath(outline_.path());
+        });
 
-      ctx.setFillStyle(pixel(0xff777777));
+        timeit("land", "Time to fill land", [&]() {
+          ctx.setFillStyle(pixel(0xff777777));
 
-      timeit("fill", "Time to fill land", [&]() {
-        r2shape_.Clear();
-        for (const S2Shape* shape : index) {
-          projection_->Project(
-            &r2shape_, &chain_stitcher_, *shape, ShapeContainsFn(*shape));
-        }
+          r2shape_.Clear();
+          for (const S2Shape* shape : index) {
+            projection_->Project(
+              &r2shape_, &chain_stitcher_, *shape, ShapeContainsFn(*shape));
+          }
 
-        Simplify(&simplified_, r2shape_);
-        ctx.fillPath(simplified_.path());
+          Simplify(&simplified_, r2shape_);
+          ctx.fillPath(simplified_.path());
+        });
       });
 
       // Draw graticules.
@@ -129,42 +134,48 @@ public:
       // Convert the viewport into a polygon.  Note we have to check whether the
       // output polygon has significantly less area than the cell union and flip
       // it because it doesn't maintain orientation for very full cell unions.
-      r2shape_.Clear();
-      for (S2CellId cell : projection.Viewport()) {
-        S2Polygon polygon{S2Cell(cell)};
+      timeit("viewport", "Time to draw the viewport outline", [&]() {
+        r2shape_.Clear();
+        for (S2CellId cell : projection.Viewport()) {
+          S2Polygon polygon{S2Cell(cell)};
 
-        projection_->Project(
+          projection_->Project(
             &r2shape_, &chain_stitcher_, S2Polygon::Shape(&polygon),
             [&](const S2Point& point) { return polygon.Contains(point); });
-      }
+        }
 
-      ctx.setFillStyle(pixel(0x77e34234));
-      ctx.fillPath(r2shape_.path());
+        ctx.setFillStyle(pixel(0x77e34234));
+        ctx.fillPath(r2shape_.path());
+      });
 
       // Draw the viewcap outline.  If it gets very close to 90 degrees, then
       // thicken the stroke so we don't get ugly drawing near the boundary.
-      const S2Cap cap = projection.Viewcap();
-      double width = 1;
-      if (M_PI / 2 - cap.radius().radians() < 1e-3) {
-        width = 2;
-      }
+      timeit("viewcap", "Time to draw the viewcap outline", [&]() {
+        const S2Cap cap = projection.Viewcap();
+        double width = 1;
+        if (M_PI / 2 - cap.radius().radians() < 1e-3) {
+          width = 2;
+        }
 
-      ctx.setStrokeStyle(pixel(0xff00316e));
-      ctx.setStrokeWidth(width);
+        ctx.setStrokeStyle(pixel(0xff00316e));
+        ctx.setStrokeWidth(width);
 
-      r2shape_.Clear();
-      projection_->Project(&r2shape_, &chain_stitcher_, cap);
-      ctx.strokePath(r2shape_.path());
+        r2shape_.Clear();
+        projection_->Project(&r2shape_, &chain_stitcher_, cap);
+        ctx.strokePath(r2shape_.path());
+      });
     }
 
     // Refill the outline using the texture as a source, this will remove any
     // overdraw or slight numerical error from the edges of the projection.
-    BLPattern texture(texture_.image());
-    ctx.save();
-    ctx.setCompOp(BL_COMP_OP_SRC_COPY);
-    ctx.setFillStyle(texture);
-    ctx.fillPath(outline_.path());
-    ctx.restore();
+    timeit("blit", "Time to reblit buffer", [&]() {
+      BLPattern texture(texture_.image());
+      ctx.save();
+      ctx.setCompOp(BL_COMP_OP_SRC_COPY);
+      ctx.setFillStyle(texture);
+      ctx.fillPath(outline_.path());
+      ctx.restore();
+    });
   }
 
  private:
