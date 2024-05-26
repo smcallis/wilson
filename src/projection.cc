@@ -25,7 +25,7 @@ namespace {  // prevent external linkage.
 
 // Given a current projection instance, implements enough of the S2Region
 // interface that S2RegionCoverer can be used to find a covering for the
-// viewport in spherical coordinates.
+// viewport.
 class S2ViewportRegion : public S2Region {
 public:
   S2ViewportRegion(const IProjection* projection)
@@ -42,21 +42,27 @@ public:
     return projection_->Viewcap();
   }
 
-  // Returns true if the given cell probably intersects the viewport.
+  // Returns true if the given cell might intersect the viewport.
   bool MayIntersect(const S2Cell& cell) const override {
     const region2 screen = projection_->Screen();
 
+    // fprintf(stderr, "screen %.12f %.12f  %.12f %.12f\n",
+    //         screen.lo().x(), screen.lo().y(), screen.hi().x(), screen.hi().y());
+
     // If the cell doesn't even intersect our cap bound then no intersection.
     if (!GetCapBound().MayIntersect(cell)) {
+      // fprintf(stderr, "not in cap\n");
       return false;
     }
 
     // If any cell vertices land inside the screen then they intersect.
     for (int ii=0; ii < 4; ++ii) {
       R2Point pnt;
-      projection_->Project(&pnt, cell.GetVertex(ii));
-      if (screen.contains(pnt)) {
-        return true;
+      if (projection_->Project(&pnt, cell.GetVertex(ii))) {
+        if (screen.contains(pnt)) {
+          // fprintf(stderr, "cell vertex contained\n");
+          return true;
+        }
       }
     }
 
@@ -65,6 +71,7 @@ public:
       S2Point corner;
       if (projection_->Unproject(&corner, screen.GetVertex(ii))) {
         if (cell.Contains(corner)) {
+          // fprintf(stderr, "cell contains corner\n");
           return true;
         }
       }
@@ -74,7 +81,32 @@ public:
     // but the cell is close enough it intersected the cap bound), or intersect
     // but only by crossing edges.  Project the cell edge into screen space and
     // look for an edge that crosses.
-    constexpr static double kPixelTolerance = 4;
+    R2Shape shape;
+    for (int ii = 0; ii < 4; ++ii) {
+      shape.Clear();
+      projection_->Project(  //
+        &shape, {cell.GetVertex(ii), cell.GetVertex(ii + 1)});
+
+      // fprintf(stderr, "cell %s edge %d\n", cell.id().ToToken().c_str(), ii);
+
+      for (int jj=0; jj < shape.nchains(); ++jj) {
+        for (int kk=0; kk < shape.chain(jj).length; ++kk) {
+          const R2Shape::Edge& edge = shape.chain_edge(jj, kk);
+          // fprintf(stderr, "  edge %.12f %.12f  %.12f %.12f\n", edge.v0.x(),
+          //         edge.v0.y(),
+          //         edge.v1.x(), edge.v1.y());
+          if (screen.contains(edge.v0) || screen.contains(edge.v1)) {
+            // fprintf(stderr, "  screen contains vertex\n");
+            return true;
+          }
+
+          if (EdgeIntersectsScreen(edge, screen)) {
+            // fprintf(stderr, "  edge intersects screen\n");
+            return true;
+          }
+        }
+      }
+    }
 
     // IProjection::EdgeList edges;
     // R2Shape r2shape;

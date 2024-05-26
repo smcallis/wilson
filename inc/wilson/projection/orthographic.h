@@ -50,13 +50,15 @@ struct Orthographic final : Projection<Orthographic> {
   S2Cap Viewcap() const override {
     // Note we cheat here and return a little less than 90 degrees to avoid
     // drawing the cap -exactly- on the clip horizon.
-    S1ChordAngle radius = S1ChordAngle::Degrees(90 - 1e-6);
-
-    S2Point corner;
-    if (Unproject(&corner, Screen().GetVertex(0))) {
-      radius = S1ChordAngle::Radians(Nadir().Angle(corner));
+    S2Cap cap(Nadir(), S1ChordAngle::Zero());
+    for (int i = 0; i < 4; ++i) {
+      S2Point corner;
+      if (!Unproject(&corner, Screen().GetVertex(i))) {
+        return S2Cap(Nadir(), S1ChordAngle::Degrees(90 - 1e-6));
+      }
+      cap.AddPoint(corner);
     }
-    return S2Cap(Nadir(), radius);
+    return cap;
   }
 
   // Populates a path representing the outline of the sphere on screen.  May

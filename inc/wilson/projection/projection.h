@@ -625,23 +625,18 @@ void Projection<Derived>::Project(absl::Nonnull<ChainSink*> out,
     return (u*std::cos(angle) + v*std::sin(angle) + c).Normalize();
   };
 
-  // Returns the error incurred by edge of the given length.
-  const S2Point v0 = CapPoint(0);
-  auto LengthError = [&](double length) {
-    const S2Point mid = S2::Interpolate(v0, CapPoint(length), 0.5);
-    return cap.GetRadius().radians() - S1ChordAngle(mid, center).radians();
-  };
-
   constexpr double kTargetError = 1e-4;
 
   // Do a simple bisection to determine how large a step size we should take.
   //
   // Testing indicates that this takes ~7 iterations to converge usually.
+  const S2Point v0 = CapPoint(0);
   double step_lo = 1e-9;
   double step_hi = 2 * M_PI / 3;
   while (std::fabs(step_hi - step_lo) > .01*step_lo) {
     const double middle = (step_lo + step_hi) / 2;
-    const double error = LengthError(middle);
+    const double error = S1ChordAngle(v0, CapPoint(middle)).radians()/2;
+
     if (error < kTargetError) {
       if (error > .90 * kTargetError) {
         break;
@@ -651,7 +646,6 @@ void Projection<Derived>::Project(absl::Nonnull<ChainSink*> out,
       step_hi = middle;
     }
   }
-
   const double step = (step_lo + step_hi) / 2;
 
   // Generate points around the cap perimeter.

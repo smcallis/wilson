@@ -32,6 +32,7 @@
 #include "s2/s2wedge_relations.h"
 
 #include "wilson/plane.h"
+#include "wilson/region.h"
 #include "wilson/quaternion.h"
 #include "wilson/r2shape.h"
 #include "wilson/projection/clipping.h"
@@ -47,7 +48,15 @@ struct Equirectangular final : Projection<Equirectangular> {
   static constexpr double kAspectRatio = 2.0;
 
   S2Cap Viewcap() const override {
-    return S2Cap::Full();
+    S2Cap cap(Nadir(), S1ChordAngle::Zero());
+    for (int i = 0; i < 4; ++i) {
+      S2Point corner;
+      if (!Unproject(&corner, Screen().GetVertex(i))) {
+        return S2Cap::Full();
+      }
+      cap.AddPoint(corner);
+    }
+    return cap;
   }
 
   void UpdateTransforms() override final {
