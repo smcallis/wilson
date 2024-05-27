@@ -131,9 +131,7 @@ public:
         }
       });
 
-      // Convert the viewport into a polygon.  Note we have to check whether the
-      // output polygon has significantly less area than the cell union and flip
-      // it because it doesn't maintain orientation for very full cell unions.
+      // Draw cell covering of the viewport.
       timeit("viewport", "Time to draw the viewport outline", [&]() {
         r2shape_.Clear();
         for (S2CellId cell : projection.Viewport()) {
@@ -148,8 +146,7 @@ public:
         ctx.fillPath(r2shape_.path());
       });
 
-      // Draw the viewcap outline.  If it gets very close to 90 degrees, then
-      // thicken the stroke so we don't get ugly drawing near the boundary.
+      // Draw the viewcap outline.
       timeit("viewcap", "Time to draw the viewcap outline", [&]() {
         const S2Cap cap = projection.Viewcap();
         if (cap.radius() < S1ChordAngle::Right()) {
