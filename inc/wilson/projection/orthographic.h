@@ -54,7 +54,7 @@ struct Orthographic final : Projection<Orthographic> {
     for (int i = 0; i < 4; ++i) {
       S2Point corner;
       if (!Unproject(&corner, Screen().GetVertex(i))) {
-        return S2Cap(Nadir(), S1ChordAngle::Degrees(90 - 1e-6));
+        return S2Cap(Nadir(), S1ChordAngle::Right());
       }
       cap.AddPoint(corner);
     }
@@ -523,7 +523,7 @@ inline void Orthographic::Project(absl::Nonnull<ChainSink*> out,
         out->Break();
       }
 
-      break;
+      return;
     }
 
     default:

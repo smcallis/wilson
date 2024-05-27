@@ -152,17 +152,14 @@ public:
       // thicken the stroke so we don't get ugly drawing near the boundary.
       timeit("viewcap", "Time to draw the viewcap outline", [&]() {
         const S2Cap cap = projection.Viewcap();
-        double width = 1;
-        if (M_PI / 2 - cap.radius().radians() < 1e-3) {
-          width = 2;
+        if (cap.radius() < S1ChordAngle::Right()) {
+          r2shape_.Clear();
+          projection_->Project(&r2shape_, &chain_stitcher_, cap);
+
+          ctx.setStrokeStyle(pixel(0xff00316e));
+          ctx.setStrokeWidth(1);
+          ctx.strokePath(r2shape_.path());
         }
-
-        ctx.setStrokeStyle(pixel(0xff00316e));
-        ctx.setStrokeWidth(width);
-
-        r2shape_.Clear();
-        projection_->Project(&r2shape_, &chain_stitcher_, cap);
-        ctx.strokePath(r2shape_.path());
       });
     }
 
