@@ -34,12 +34,12 @@
 #include "s2/s2shapeutil_contains_brute_force.h"
 
 #include "wilson/graphics/pixel.h"
-#include "wilson/chain_sink.h"
 #include "wilson/chain_stitcher.h"
 #include "wilson/quaternion.h"
 #include "wilson/r2shape.h"
 #include "wilson/region.h"
 #include "wilson/transform.h"
+#include "wilson/vertex_sink.h"
 
 namespace w {
 
@@ -291,12 +291,12 @@ public:
   //
   // Does not clear the sink before appending.  The resulting outline is
   // suitable for filling with a background color for the projection as a whole.
-  virtual void MakeOutline(absl::Nonnull<ChainSink*> out) const = 0;
+  virtual void MakeOutline(absl::Nonnull<R2VertexSink*> out) const = 0;
 
   // Appends a graticule showing lines of latitude and longitude to a sink.
   //
   // Does not clear the sink before appending.
-  virtual void MakeGraticule(absl::Nonnull<ChainSink*> out) const = 0;
+  virtual void MakeGraticule(absl::Nonnull<R2VertexSink*> out) const = 0;
 
   // Returns an S2Cap covering the viewport.  This is a coarse covering but
   // generally much faster than getting a full viewport covering via Viewport().
@@ -363,7 +363,7 @@ public:
   //
   // Does not clear the sink before appending.  May add breaks to the ChainSink.
   virtual void Project( //
-    absl::Nonnull<ChainSink*> out, const S2Shape::Edge& edge) const = 0;
+    absl::Nonnull<R2VertexSink*> out, const S2Shape::Edge& edge) const = 0;
 
 
   // Projects a shape of 0 or 1 dimensions into screen space.  Any edges are
@@ -372,7 +372,7 @@ public:
   //
   // Does not clear the sink before appending.  May add breaks to the ChainSink.
   virtual void Project(  //
-    absl::Nonnull<ChainSink*> out, const S2Shape& shape) const = 0;
+    absl::Nonnull<R2VertexSink*> out, const S2Shape& shape) const = 0;
 
 
   // Projects a polygon into screen space.  0 and 1 dimensional shapes should
@@ -389,7 +389,7 @@ public:
   //
   // Does not clear the sink before appending.  May add breaks to the ChainSink.
   virtual void Project(  //
-      absl::Nonnull<ChainSink*> out, absl::Nonnull<ChainStitcher*> stitcher,
+      absl::Nonnull<R2VertexSink*> out, absl::Nonnull<ChainStitcher*> stitcher,
       const S2Shape&, ContainsPointFn contains) const = 0;
 
 
@@ -402,7 +402,7 @@ public:
   //
   // Does not clear the sink before appending.  May add breaks to the ChainSink.
   virtual void Project(  //
-      absl::Nonnull<ChainSink*> out, absl::Nonnull<ChainStitcher*> stitcher,
+      absl::Nonnull<R2VertexSink*> out, absl::Nonnull<ChainStitcher*> stitcher,
       const S2Cap& cap) const = 0;
 
   // --------------------------------------------------------------------------
@@ -510,7 +510,7 @@ public:
 
   virtual S2Cap Viewcap() const override;
 
-  virtual void Project(absl::Nonnull<ChainSink*> out,
+  virtual void Project(absl::Nonnull<R2VertexSink*> out,
     absl::Nonnull<ChainStitcher*> stitcher, const S2Cap& cap) const override;
 
   virtual bool Unproject(
@@ -610,7 +610,7 @@ bool Projection<Derived>::Unproject(
 }
 
 template <typename Derived>
-void Projection<Derived>::Project(absl::Nonnull<ChainSink*> out,
+void Projection<Derived>::Project(absl::Nonnull<R2VertexSink*> out,
   absl::Nonnull<ChainStitcher*> stitcher, const S2Cap& cap) const {
 
   // Find the center of the cap and vectors defining the plane it lies in.

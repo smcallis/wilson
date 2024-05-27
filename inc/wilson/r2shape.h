@@ -34,11 +34,11 @@
 #include "absl/algorithm/container.h"
 #include "s2/r2.h"
 
-#include "wilson/chain_sink.h"
+#include "wilson/vertex_sink.h"
 
 namespace w {
 
-struct R2Shape : public ChainSink {
+struct R2Shape : public R2VertexSink {
   struct Edge {
     Edge() = default;
     Edge(const R2Point& v0, const R2Point& v1)

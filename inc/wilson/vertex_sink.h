@@ -17,13 +17,15 @@
 #include "absl/types/span.h"
 
 #include "s2/r2.h"
+#include "s2/s2point.h"
 
 namespace w {
 
 // An abstract interface for something that can receive vertices and group them
 // into chains.
 
-class ChainSink {
+template <typename Point>
+class VertexSink {
  public:
   // Clears the buffer to its initial state, as though nothing has been added.
   virtual void Clear() = 0;
@@ -39,10 +41,10 @@ class ChainSink {
   virtual void Close() = 0;
 
   // Appends a single point to the current chain.
-  virtual void Append(const R2Point&) = 0;
+  virtual void Append(const Point&) = 0;
 
   // Appends a span of points to the current chain.
-  virtual void Append(absl::Span<const R2Point>) = 0;
+  virtual void Append(absl::Span<const Point>) = 0;
 
   // Returns the total number of vertices.
   virtual ssize_t Size() const = 0;
@@ -61,10 +63,13 @@ class ChainSink {
   }
 };
 
+using R2VertexSink = VertexSink<R2Point>;
+using S2VertexSink = VertexSink<S2Point>;
+
 // Adds a new chain to the sink that's a closed circle.  The circle is segmented
 // into lines such that the maximum distance from any given line segment to the
 // circle is less than `max_error`.
-inline void AppendCircle(absl::Nonnull<ChainSink*> out,  //
+inline void AppendCircle(absl::Nonnull<R2VertexSink*> out,  //
   const R2Point& center, double radius, double max_error) {
 
   // The sagitta of a chord subtending an angle θ is

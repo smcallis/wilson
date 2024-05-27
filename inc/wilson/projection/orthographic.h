@@ -63,7 +63,7 @@ struct Orthographic final : Projection<Orthographic> {
 
   // Populates a path representing the outline of the sphere on screen.  May
   // encompass the entire screen.
-  void MakeOutline(absl::Nonnull<ChainSink*> out) const override {
+  void MakeOutline(absl::Nonnull<R2VertexSink*> out) const override {
     out->Break();
 
     // Find basis vectors for nadir plane that correspond to the axes of
@@ -77,7 +77,7 @@ struct Orthographic final : Projection<Orthographic> {
   }
 
   // Populates a path with a graticule with lines of latitude and longitude.
-  void MakeGraticule(absl::Nonnull<ChainSink*> out) const override {
+  void MakeGraticule(absl::Nonnull<R2VertexSink*> out) const override {
     //out->Clear();
     //GenerateGraticule(out);
   }
@@ -129,9 +129,9 @@ struct Orthographic final : Projection<Orthographic> {
   }
 
   // Projection functions.
-  void Project(absl::Nonnull<ChainSink*> out, const S2Shape::Edge&) const override;
-  void Project(absl::Nonnull<ChainSink*> out, const S2Shape&) const override;
-  void Project(absl::Nonnull<ChainSink*> out, absl::Nonnull<ChainStitcher*>, const S2Shape&, ContainsPointFn contains) const override;
+  void Project(absl::Nonnull<R2VertexSink*> out, const S2Shape::Edge&) const override;
+  void Project(absl::Nonnull<R2VertexSink*> out, const S2Shape&) const override;
+  void Project(absl::Nonnull<R2VertexSink*> out, absl::Nonnull<ChainStitcher*>, const S2Shape&, ContainsPointFn contains) const override;
 
 protected:
   // Updates the transformation matrices.
@@ -186,7 +186,7 @@ protected:
   // Expects that the edge has been properly clipped so that projecting will not
   // wrap in screen space, which will lead to unpredictable results.
   void Subdivide(  //
-    ChainSink* out, const S2Shape::Edge& edge) const {
+    R2VertexSink* out, const S2Shape::Edge& edge) const {
 
     const R2Point p0 = Project(edge.v0);
     const R2Point p1 = Project(edge.v1);
@@ -202,7 +202,7 @@ protected:
   }
 
   // Helper method that recursively subdivides an edge.
-  void Subdivide(absl::Nonnull<ChainSink*> out,
+  void Subdivide(absl::Nonnull<R2VertexSink*> out,
     const S2Shape::Edge& s2edge, const R2Shape::Edge& r2edge) const {
 
     // Compute a point halfway along the edge.
@@ -483,7 +483,7 @@ protected:
 //   }
 // }
 
-inline void Orthographic::Project(absl::Nonnull<ChainSink*> out,
+inline void Orthographic::Project(absl::Nonnull<R2VertexSink*> out,
   const S2Shape::Edge& edge) const {
 
   const ClipResult ans = ClipEdge(edge);
@@ -534,7 +534,7 @@ inline void Orthographic::Project(absl::Nonnull<ChainSink*> out,
 
 
 inline void Orthographic::Project(  //
-  absl::Nonnull<ChainSink*> out, const S2Shape& shape) const {
+  absl::Nonnull<R2VertexSink*> out, const S2Shape& shape) const {
   DCHECK_LT(shape.dimension(), 2);
 
   // Points don't need anything fancy, just project them.
@@ -607,7 +607,7 @@ inline void Orthographic::Project(  //
   }
 }
 
-inline void Orthographic::Project(absl::Nonnull<ChainSink*> out,
+inline void Orthographic::Project(absl::Nonnull<R2VertexSink*> out,
   absl::Nonnull<ChainStitcher*> stitcher, const S2Shape& shape, ContainsPointFn contains) const {
 
   // Adds a chain of vertices to the output.

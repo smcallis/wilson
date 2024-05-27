@@ -20,13 +20,13 @@
 #include "s2/util/bitmap/bitmap.h"
 #include "absl/functional/function_ref.h"
 
-#include "wilson/chain_sink.h"
+#include "wilson/vertex_sink.h"
 
 namespace w {
 
 // A helper class to support stitching cut polygon loops back together.
 
-class ChainStitcher : public ChainSink {
+class ChainStitcher : public R2VertexSink {
  private:
   static constexpr int kUnconnected = -1;
 
