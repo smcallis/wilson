@@ -710,6 +710,15 @@ public:
       if (event.key.keysym.sym == SDLK_UP) {
         angle_ += .1;
       }
+
+      if (event.key.keysym.sym == SDLK_0) {
+        // Reset rotation to default.
+        Quaternion rotation({0, 1, 0}, 0.0);
+        projection_->SetRotation(rotation);
+        inset_.SetRotation(rotation);
+        dirty_.SetAll(true);
+      }
+
       return;
     }
 
@@ -941,7 +950,7 @@ private:
   util::bitmap::Bitmap64 dirty_;
 
   bool show_sidebar_ = false;
-  double angle_ = 1.740043031169582699;
+  double angle_ = 0;
   // Drawing context for 2D graphics.
   BLContext context_;
   Pixbuffer texture_;
