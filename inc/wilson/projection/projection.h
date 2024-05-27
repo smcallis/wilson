@@ -303,7 +303,7 @@ public:
   virtual S2Cap Viewcap() const = 0;
 
   // Returns an S2CellUnion cell covering for the visible region of the sphere.
-  virtual const S2CellUnion& Viewport() const;
+  virtual S2CellUnion Viewport() const;
 
   //--------------------------------------------------------------------------
   // Transformation API
@@ -454,8 +454,8 @@ private:
   // A cell covering for the viewport, guarded by a mutex so that we can
   // generate it on-demand.
   mutable absl::Mutex viewport_lock_;
-  mutable bool viewport_dirty_ = true; ABSL_GUARDED_BY(viewport_lock_);
-  mutable S2CellUnion viewport_ ABSL_GUARDED_BY(viewport_lock_);
+  mutable ABSL_GUARDED_BY(viewport_lock_) bool viewport_dirty_ = true;
+  mutable ABSL_GUARDED_BY(viewport_lock_) S2CellUnion viewport_;
 };
 
 // A partial implementation of IProjection that provides default implementations
@@ -625,28 +625,52 @@ void Projection<Derived>::Project(absl::Nonnull<ChainSink*> out,
     return (u*std::cos(angle) + v*std::sin(angle) + c).Normalize();
   };
 
-  constexpr double kTargetError = 1e-4;
-
-  // Do a simple bisection to determine how large a step size we should take.
+  // We'll distinguish angles by referring them to as a cap-angle, meaning the
+  // angle between two points in the UV plane of the cap, and as origin-angle,
+  // meaning the regular angle around the origin between two points.
   //
-  // Testing indicates that this takes ~7 iterations to converge usually.
-  const S2Point v0 = CapPoint(0);
-  double step_lo = 1e-9;
-  double step_hi = 2 * M_PI / 3;
-  while (std::fabs(step_hi - step_lo) > .01*step_lo) {
-    const double middle = (step_lo + step_hi) / 2;
-    const double error = S1ChordAngle(v0, CapPoint(middle)).radians()/2;
+  // The length of the chord subtended by a cap-angle θ₀ is:
+  //
+  //   L = 2*base*sin(θ₀/2) or
+  //
+  // This length is the same with an origin-angle of θ₁, with a radius of 1:
+  //
+  //   L = 2*sin(θ₁/2)
+  //
+  // Equating the two:
+  //
+  //   2*sin(θ₁/2) = 2*base*sin(θ₀/2).
+  //
+  // Solving for the cap-angle and origin-angle:
+  //
+  //   θ₀ = 2*asin(sin(θ₁/2)/base)
+  //   θ₁ = 2*asin(base*sin(θ₀/2))
+  //
+  // Given a cap with radius R, two points 180 degrees apart will have an
+  // origin-angle of 2*asin(base*sin(180/2)) = 2*asin(sin(R)) = 2*R.  Similarly
+  // two points with an origin-angle of 2*R will have a cap-angle of
+  // 2*asin(sin(2*R/2)/base) = 2*asin(sin(R)/sin(R)) = 2*asin(1) = 2*90 = 180.
+  //
+  // An edge with origin-angle length L with vertices on the cap will have a
+  // maximum error of L/2 to the cap boundary.  Thus, if we have a maximum error
+  // we're targetting, we can solve for the maximum cap-angle length that gives
+  // us that error:
+  //
+  //    error = L/2  ->  L = 2*error  converting to origin-angle:
+  //
+  //    step = 2*asin(sin(2*error/2)/base)
+  //    step = 2*asin(sin(error)/base)
 
-    if (error < kTargetError) {
-      if (error > .90 * kTargetError) {
-        break;
-      }
-      step_lo = middle;
-    } else {
-      step_hi = middle;
-    }
+  // Maximum error between the estimated cap boundary and the actual boundary.
+  static const double kTargetErrorSine = sin(1e-2);
+
+  // If the base is zero (cap is a full cap or empty cap), then default to
+  // just drawing three arcs.
+  double step = 2 * M_PI / 3;
+  if (base != 0) {
+    step = 2 * std::asin(std::min(1.0, kTargetErrorSine / base));
   }
-  const double step = (step_lo + step_hi) / 2;
+  step = std::min(step, 2 * M_PI / 3);
 
   // Generate points around the cap perimeter.
   std::vector<std::vector<S2Point>> loops;

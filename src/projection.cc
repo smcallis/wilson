@@ -174,7 +174,7 @@ private:
 };
 }  // namespace
 
-const S2CellUnion& IProjection::Viewport() const {
+S2CellUnion IProjection::Viewport() const {
   // Try to just return the current viewport if we have one.
   if (!viewport_dirty_) {
     absl::ReaderMutexLock lock(&viewport_lock_);
@@ -186,7 +186,7 @@ const S2CellUnion& IProjection::Viewport() const {
   // Otherwise we have to generate it.
   absl::WriterMutexLock lock(&viewport_lock_);
   S2RegionCoverer::Options options;
-  options.set_max_cells(16);
+  options.set_max_cells(32);
 
   // We can Release the vector from the current viewport, populate it and then
   // recycle it back into the viewport to re-use the memory.
