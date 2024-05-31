@@ -16,5 +16,5 @@
 #include "wilson/testing.h"
 
 // Add headers with tests here.
-#include "wilson/region.h"
-#include "wilson/chain_stitcher.h"
+#include "wilson/geometry/region.h"
+#include "wilson/geometry/chain_stitcher.h"

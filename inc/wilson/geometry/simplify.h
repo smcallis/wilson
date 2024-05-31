@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "wilson/r2shape.h"
+#include "wilson/geometry/r2shape.h"
 
 #include <vector>
 

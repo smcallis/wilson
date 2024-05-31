@@ -21,7 +21,7 @@
 #include <mutex>
 #include <vector>
 
-#include <wilson/region.h>
+#include <wilson/geometry/region.h>
 #include <wilson/graphics/pixel.h>
 
 namespace w {

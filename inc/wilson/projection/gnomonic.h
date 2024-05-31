@@ -27,11 +27,11 @@
 #include "s2/s2edge_distances.h"
 #include "s2/s2wedge_relations.h"
 
-#include "wilson/chain_stitcher.h"
-#include "wilson/plane.h"
+#include "wilson/geometry/chain_stitcher.h"
+#include "wilson/geometry/plane.h"
 #include "wilson/projection.h"
-#include "wilson/quaternion.h"
-#include "wilson/r2shape.h"
+#include "wilson/geometry/quaternion.h"
+#include "wilson/geometry/r2shape.h"
 
 namespace w {
 

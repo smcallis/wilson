@@ -28,9 +28,9 @@
 #include "s2/s2predicates.h"
 #include "s2/s2edge_distances.h"
 
-#include "wilson/plane.h"
-#include "wilson/quaternion.h"
-#include "wilson/r2shape.h"
+#include "wilson/geometry/plane.h"
+#include "wilson/geometry/quaternion.h"
+#include "wilson/geometry/r2shape.h"
 #include "wilson/projection/clipping.h"
 #include "wilson/projection/projection.h"
 

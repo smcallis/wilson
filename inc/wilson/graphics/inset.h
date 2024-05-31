@@ -26,11 +26,11 @@
 #include "s2/util/coding/coder.h"
 
 // Project requirements
-#include "wilson/chain_stitcher.h"
+#include "wilson/geometry/chain_stitcher.h"
 #include "wilson/graticule.h"
-#include "wilson/quaternion.h"
-#include "wilson/region.h"
-#include "wilson/simplify.h"
+#include "wilson/geometry/quaternion.h"
+#include "wilson/geometry/region.h"
+#include "wilson/geometry/simplify.h"
 #include "wilson/timing.h"
 
 #include "wilson/generated/land_simplified.h"

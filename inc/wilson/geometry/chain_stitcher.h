@@ -20,7 +20,7 @@
 #include "s2/util/bitmap/bitmap.h"
 #include "absl/functional/function_ref.h"
 
-#include "wilson/vertex_sink.h"
+#include "wilson/geometry/vertex_sink.h"
 
 namespace w {
 

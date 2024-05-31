@@ -38,7 +38,7 @@
 #include <stdexcept>
 
 // local
-#include <wilson/region.h>
+#include <wilson/geometry/region.h>
 #include <wilson/graphics/compositor.h>
 #include <wilson/graphics/pixbuffer.h>
 #include <wilson/graphics/pixel.h>

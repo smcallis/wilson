@@ -18,7 +18,7 @@
 #include "s2/s2region.h"
 #include "s2/s2region_coverer.h"
 
-#include "wilson/region.h"
+#include "wilson/geometry/region.h"
 
 namespace w {
 namespace {  // prevent external linkage.

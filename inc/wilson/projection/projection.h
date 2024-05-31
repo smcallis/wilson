@@ -34,12 +34,12 @@
 #include "s2/s2shapeutil_contains_brute_force.h"
 
 #include "wilson/graphics/pixel.h"
-#include "wilson/chain_stitcher.h"
-#include "wilson/quaternion.h"
-#include "wilson/r2shape.h"
-#include "wilson/region.h"
-#include "wilson/transform.h"
-#include "wilson/vertex_sink.h"
+#include "wilson/geometry/chain_stitcher.h"
+#include "wilson/geometry/quaternion.h"
+#include "wilson/geometry/r2shape.h"
+#include "wilson/geometry/region.h"
+#include "wilson/geometry/transform.h"
+#include "wilson/geometry/vertex_sink.h"
 
 namespace w {
 

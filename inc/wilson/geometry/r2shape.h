@@ -34,7 +34,7 @@
 #include "absl/algorithm/container.h"
 #include "s2/r2.h"
 
-#include "wilson/vertex_sink.h"
+#include "wilson/geometry/vertex_sink.h"
 
 namespace w {
 

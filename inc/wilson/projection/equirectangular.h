@@ -31,10 +31,10 @@
 #include "s2/s2predicates.h"
 #include "s2/s2wedge_relations.h"
 
-#include "wilson/plane.h"
-#include "wilson/region.h"
-#include "wilson/quaternion.h"
-#include "wilson/r2shape.h"
+#include "wilson/geometry/plane.h"
+#include "wilson/geometry/region.h"
+#include "wilson/geometry/quaternion.h"
+#include "wilson/geometry/r2shape.h"
 #include "wilson/projection/clipping.h"
 #include "wilson/projection/projection.h"
 

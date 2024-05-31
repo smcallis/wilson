@@ -18,7 +18,7 @@
 #include "s2/s2cell.h"
 
 #include "wilson/projection/projection.h"
-#include "wilson/plane.h"
+#include "wilson/geometry/plane.h"
 
 namespace w {
 

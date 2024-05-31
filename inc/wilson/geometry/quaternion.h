@@ -15,7 +15,7 @@
 // limitations under the License.
 
 #include "s2/util/math/vector.h"
-#include "wilson/transform.h"
+#include "wilson/geometry/transform.h"
 
 template <typename T>
 struct _quaternion {
