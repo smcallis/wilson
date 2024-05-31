@@ -27,6 +27,8 @@ namespace w {
 template <typename Point>
 class VertexSink {
  public:
+  virtual ~VertexSink() = default;
+
   // Clears the buffer to its initial state, as though nothing has been added.
   virtual void Clear() = 0;
 
