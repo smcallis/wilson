@@ -171,13 +171,13 @@ private:
   static constexpr uint8_t kWest  = 4;
 
   // Returns true if a boundary is east or west.
-  static constexpr inline bool IsEastWest(uint8_t b) {
-    return b && b % 2 == 0;
+  static constexpr inline bool IsEastWest(uint8_t boundary) {
+    return boundary && boundary % 2 == 0;
   }
 
   // Returns true if a boundary is north or south.
-  static constexpr inline bool IsNorthSouth(uint8_t b) {
-    return b && b % 2 == 1;
+  static constexpr inline bool IsNorthSouth(uint8_t boundary) {
+    return boundary && boundary % 2 == 1;
   }
 
   // A crossing where an edge crossed the anti-meridian.  We store the vertex
