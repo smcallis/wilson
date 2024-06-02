@@ -443,8 +443,7 @@ private:
     // The edge crossed the anti-meridian.  The signs must be opposite so we can
     // chop the edge into two pieces.
     DCHECK_EQ(sign0, -sign1);
-
-    return ClipResult::Chop(isect, sign0 - sign1);
+    return ClipResult::Split(isect, sign0 - sign1);
   }
 };
 
@@ -455,9 +454,9 @@ private:
 inline void Equirectangular::Project(absl::Nonnull<R2VertexSink*> out,
   const S2Shape::Edge& edge) const {
 
-  const ClipResult ans = ClipEdge(edge);
+  const ClipResult result = ClipEdge(edge);
 
-  switch (ans.status()) {
+  switch (result.action) {
     // The edge was dropped, we can just ignore it.
     case ClipResult::kDrop:
       return;
@@ -467,35 +466,33 @@ inline void Equirectangular::Project(absl::Nonnull<R2VertexSink*> out,
       Subdivide(out, edge);
       return;
 
-    // The edge needs to be chopped in half since it wrapped.
-    case ClipResult::kChop: {
-      const uint8_t b0 = ans.direction > 0 ? kEast : kWest;
-      const uint8_t b1 = ans.direction > 0 ? kWest : kEast;
+    // The edge needs to be split in half since it wrapped.
+    case ClipResult::kSplit: {
+      const uint8_t b0 = result.direction > 0 ? kEast : kWest;
+      const uint8_t b1 = result.direction > 0 ? kWest : kEast;
 
-      Subdivide(out, {edge.v0, *ans.isect}, BoundaryPair::Snap1(b0));
+      Subdivide(out, {edge.v0, result.point[0]}, BoundaryPair::Snap1(b0));
       out->Break();
-      Subdivide(out, {*ans.isect, edge.v1}, BoundaryPair::Snap0(b1));
+      Subdivide(out, {result.point[0], edge.v1}, BoundaryPair::Snap0(b1));
       return;
     }
 
     // One or the other vertex needs to be snapped to a boundary.
-    case ClipResult::kSnap: {
-      const uint8_t b0 = ans.boundary.b0;
-      const uint8_t b1 = ans.boundary.b1;
-
-      if (b0) {
-        DCHECK(!b1);
-        out->Break();
-        Subdivide(out, edge, BoundaryPair::Snap0(b0));
-      }
-
-      if (b1) {
-        DCHECK(!b0);
-        Subdivide(out, edge, BoundaryPair::Snap1(b1));
-        out->Break();
-      }
+    case ClipResult::kSnap0: {
+      out->Break();
+      Subdivide(out, edge, BoundaryPair::Snap0(result.boundary[0]));
       return;
     }
+
+    case ClipResult::kSnap1: {
+      Subdivide(out, edge, BoundaryPair::Snap1(result.boundary[1]));
+      out->Break();
+      return;
+    }
+
+    // The other cases should never occur.
+    default:
+      ABSL_UNREACHABLE();
   }
   ABSL_UNREACHABLE();
 }
@@ -527,9 +524,9 @@ inline void Equirectangular::Project(  //
     for (int i = 0, n = shape.chain(chain).length; i < n; ++i) {
       const S2Shape::Edge& edge = shape.chain_edge(chain, i);
 
-      ClipResult ans = ClipEdge(edge);
+      ClipResult result = ClipEdge(edge);
 
-      switch (ans.status()) {
+      switch (result.action) {
         // The edge was dropped, ignore it.
         case ClipResult::kDrop:
           break;
@@ -539,33 +536,29 @@ inline void Equirectangular::Project(  //
           Subdivide(out, edge);
           break;
 
-        // We have to chop the edge into two pieces.
-        case ClipResult::kChop: {
-          const uint8_t b0 = ans.direction > 0 ? kEast : kWest;
-          const uint8_t b1 = ans.direction > 0 ? kWest : kEast;
+        // We have to split the edge into two pieces.
+        case ClipResult::kSplit: {
+          const uint8_t b0 = result.direction > 0 ? kEast : kWest;
+          const uint8_t b1 = result.direction > 0 ? kWest : kEast;
 
-          Subdivide(out, {edge.v0, *ans.isect}, BoundaryPair::Snap1(b0));
+          Subdivide(out, {edge.v0, result.point[0]}, BoundaryPair::Snap1(b0));
           out->Break();
-          Subdivide(out, {*ans.isect, edge.v1}, BoundaryPair::Snap0(b1));
+          Subdivide(out, {result.point[0], edge.v1}, BoundaryPair::Snap0(b1));
           break;
         }
 
         // We need to snap one vertex or the other.
-        case ClipResult::kSnap: {
-          const uint8_t b0 = ans.boundary.b0;
-          const uint8_t b1 = ans.boundary.b1;
-
-          if (b0) {
-            DCHECK(!b1);
-            Subdivide(out, edge, BoundaryPair::Snap0(b0));
-          }
-
-          if (b1) {
-            DCHECK(!b0);
-            Subdivide(out, edge, BoundaryPair::Snap1(b1));
-          }
+        case ClipResult::kSnap0:
+          Subdivide(out, edge, BoundaryPair::Snap0(result.boundary[0]));
           break;
-        }
+
+        case ClipResult::kSnap1:
+          Subdivide(out, edge, BoundaryPair::Snap1(result.boundary[1]));
+          break;
+
+        // The other cases should never occur.
+        default:
+          ABSL_UNREACHABLE();
       }
     }
   }
@@ -597,9 +590,9 @@ inline void Equirectangular::Project(absl::Nonnull<R2VertexSink*> out,
     for (int i = 0, n = shape.chain(chain).length; i < n; ++i) {
       const S2Shape::Edge& edge = shape.chain_edge(chain, i);
 
-      ClipResult ans = ClipEdge(edge);
+      ClipResult result = ClipEdge(edge);
 
-      switch (ans.status()) {
+      switch (result.action) {
         // Edge was dropped, ignore it.
         case ClipResult::kDrop:
           break;
@@ -609,13 +602,14 @@ inline void Equirectangular::Project(absl::Nonnull<R2VertexSink*> out,
           Subdivide(stitcher, edge);
           break;
 
-        // We have to chop the edge into two pieces.
-        case ClipResult::kChop: {
-          const uint8_t b0 = ans.direction > 0 ? kEast : kWest;
-          const uint8_t b1 = ans.direction > 0 ? kWest : kEast;
+        // We have to split the edge into two pieces.
+        case ClipResult::kSplit: {
+          const uint8_t b0 = result.direction > 0 ? kEast : kWest;
+          const uint8_t b1 = result.direction > 0 ? kWest : kEast;
+          const S2Point& isect = result.point[0];
 
-          // Tessellate the first half of the edge.  Snap isect to a boundary.
-          Subdivide(stitcher, {edge.v0, *ans.isect}, BoundaryPair::Snap1(b0));
+          // Tessellate the first half of the edge.  Snap to a boundary.
+          Subdivide(stitcher, {edge.v0, isect}, BoundaryPair::Snap1(b0));
           stitcher->Break();
 
           // Add crossings for the two boundaries we crossed.
@@ -624,38 +618,38 @@ inline void Equirectangular::Project(absl::Nonnull<R2VertexSink*> out,
           crossings.emplace_back(Crossing::Incoming(idx + 1, b1));
 
           // Tessellate the second half of the edge.  Snap isect to a boundary.
-          Subdivide(stitcher, {*ans.isect, edge.v1}, BoundaryPair::Snap0(b1));
+          Subdivide(stitcher, {isect, edge.v1}, BoundaryPair::Snap0(b1));
           break;
         }
 
         // We need to snap one vertex or the other.
-        case ClipResult::kSnap: {
-          const uint8_t b0 = ans.boundary.b0;
-          const uint8_t b1 = ans.boundary.b1;
+        case ClipResult::kSnap0: {
+          const uint8_t b0 = result.boundary[0];
+          const int next = stitcher->NextVertex();
+          Subdivide(stitcher, edge, BoundaryPair::Snap0(b0));
 
-          if (b0) {
-            DCHECK(!b1);
-            const int next = stitcher->NextVertex();
-            Subdivide(stitcher, edge, BoundaryPair::Snap0(b0));
-
-            // Don't add crossings for the poles.
-            if (IsEastWest(b0)) {
-              crossings.push_back(Crossing::Incoming(next, b0));
-            }
-          }
-
-          if (b1) {
-            DCHECK(!b0);
-            Subdivide(stitcher, edge, BoundaryPair::Snap1(b1));
-
-            // Don't add crossings for the poles.
-            if (IsEastWest(b1)) {
-              crossings.push_back(  //
-                Crossing::Outgoing(stitcher->LastVertex(), b1));
-            }
+          // Don't add crossings for the poles.
+          if (IsEastWest(b0)) {
+            crossings.push_back(Crossing::Incoming(next, b0));
           }
           break;
         }
+
+        case ClipResult::kSnap1: {
+          const uint8_t b1 = result.boundary[1];
+          Subdivide(stitcher, edge, BoundaryPair::Snap1(b1));
+
+          // Don't add crossings for the poles.
+          if (IsEastWest(b1)) {
+            crossings.push_back(  //
+              Crossing::Outgoing(stitcher->LastVertex(), b1));
+          }
+          break;
+        }
+
+        // The other cases shouldn't happen.
+        default:
+          ABSL_UNREACHABLE();
       }
     }
 

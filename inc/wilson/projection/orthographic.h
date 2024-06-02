@@ -328,8 +328,13 @@ protected:
     if (sign1 - sign0 > 0) {
       isect = -isect;
     }
+    DCHECK_EQ(sign0, -sign1);
 
-    return ClipResult::Chop(isect, sign1 - sign0);
+    if (sign0 > 0) {
+      return ClipResult::Crop1(isect);
+    } else {
+      return ClipResult::Crop0(isect);
+    }
   }
 
   // Forward and reverse transformation matrices.
@@ -486,9 +491,9 @@ protected:
 inline void Orthographic::Project(absl::Nonnull<R2VertexSink*> out,
   const S2Shape::Edge& edge) const {
 
-  const ClipResult ans = ClipEdge(edge);
+  const ClipResult result = ClipEdge(edge);
 
-  switch (ans.status()) {
+  switch (result.action) {
     // The edge was dropped, we can just ignore it.
     case ClipResult::kDrop:
       return;
@@ -499,33 +504,31 @@ inline void Orthographic::Project(absl::Nonnull<R2VertexSink*> out,
       return;
 
     // The edge needs to be chopped in half since it wrapped.
-    case ClipResult::kChop: {
-      if (ans.direction < 0) {  // outgoing
-        Subdivide(out, {edge.v0, *ans.isect});
-        out->Break();
-      }
+    case ClipResult::kCrop0: {  // incoming
+      Subdivide(out, {result.point[0], edge.v1});
+      return;
+    }
 
-      if (ans.direction > 0) {  // incoming
-        Subdivide(out, {*ans.isect, edge.v1});
-      }
+    case ClipResult::kCrop1: {  // outgoing
+      Subdivide(out, {edge.v0, result.point[1]});
+      out->Break();
       return;
     }
 
       // One or the other vertex needs to be snapped to a boundary.
-    case ClipResult::kSnap: {
-      if (ans.boundary.b0) {  // incoming
-        out->Break();
-        Subdivide(out, edge);
-      }
-
-      if (ans.boundary.b1) {  // outgoing
-        Subdivide(out, edge);
-        out->Break();
-      }
-
+    case ClipResult::kSnap0: {  // incoming
+      out->Break();
+      Subdivide(out, edge);
       return;
     }
 
+    case ClipResult::kSnap1: {  // outgoing
+      Subdivide(out, edge);
+      out->Break();
+      return;
+    }
+
+    // The other cases should never happen.
     default:
       ABSL_UNREACHABLE();
   }
@@ -560,9 +563,9 @@ inline void Orthographic::Project(  //
     for (int i = 0, n = shape.chain(chain).length; i < n; ++i) {
       const S2Shape::Edge& edge = shape.chain_edge(chain, i);
 
-      ClipResult ans = ClipEdge(edge);
+      ClipResult result = ClipEdge(edge);
 
-      switch (ans.status()) {
+      switch (result.action) {
         // The edge was dropped, ignore it.
         case ClipResult::kDrop:
           break;
@@ -573,33 +576,31 @@ inline void Orthographic::Project(  //
           break;
 
         // We have to chop the edge into two pieces.
-        case ClipResult::kChop: {
-          if (ans.direction < 0) {  // outgoing
-            Subdivide(out, {edge.v0, *ans.isect});
-            out->Break();
-          }
+        case ClipResult::kCrop0: {  // incoming
+          Subdivide(out, {result.point[0], edge.v1});
+          break;
+        }
 
-          if (ans.direction > 0) {  // incoming
-            Subdivide(out, {*ans.isect, edge.v1});
-          }
+        case ClipResult::kCrop1: {  // outgoing
+          Subdivide(out, {edge.v0, result.point[1]});
+          out->Break();
           break;
         }
 
         // One or the other vertex needs to be snapped to a boundary.
-        case ClipResult::kSnap: {
-          if (ans.boundary.b0) {  // incoming
-            out->Break();
-            Subdivide(out, edge);
-          }
-
-          if (ans.boundary.b1) {  // outgoing
-            Subdivide(out, edge);
-            out->Break();
-          }
-
+        case ClipResult::kSnap0: {  // incoming
+          out->Break();
+          Subdivide(out, edge);
           break;
         }
 
+        case ClipResult::kSnap1: {  // outgoing
+          Subdivide(out, edge);
+          out->Break();
+          break;
+        }
+
+        // The other cases shouldn't happen.
         default:
           ABSL_UNREACHABLE();
       }
@@ -668,9 +669,9 @@ inline void Orthographic::Project(absl::Nonnull<R2VertexSink*> out,
     for (int i = 0, n = shape.chain(chain).length; i < n; ++i) {
       const S2Shape::Edge& edge = shape.chain_edge(chain, i);
 
-      const ClipResult ans = ClipEdge(edge);
+      const ClipResult result = ClipEdge(edge);
 
-      switch (ans.status()) {
+      switch (result.action) {
         // The edge was dropped, we can just ignore it.
         case ClipResult::kDrop:
           continue;
@@ -680,46 +681,45 @@ inline void Orthographic::Project(absl::Nonnull<R2VertexSink*> out,
           Subdivide(stitcher, edge);
           break;
 
-          // The edge crossed the clip plane and needs to be chopped in half.
-        case ClipResult::kChop:
-          if (ans.direction < 0) {  // outgoing
-            Subdivide(stitcher, {edge.v0, *ans.isect});
-            stitcher->Break();
+          // The edge crossed the clip plane and needs to be cropped.
+        case ClipResult::kCrop0: {  // incoming
+          crossings.push_back(  //
+            Crossing::Incoming(result.point[0], stitcher->NextVertex()));
 
-            crossings.push_back(  //
-              Crossing::Outgoing(*ans.isect, stitcher->LastVertex()));
-          }
-
-          if (ans.direction > 0) {  // incoming
-            crossings.push_back(  //
-              Crossing::Incoming(*ans.isect, stitcher->NextVertex()));
-
-            stitcher->Break();
-            Subdivide(stitcher, {*ans.isect, edge.v1});
-          }
-          break;
-
-        // One or the other vertex needs to be snapped to a boundary.
-        case ClipResult::kSnap: {
-          if (ans.boundary.b0) {  // incoming
-            crossings.push_back(  //
-              Crossing::Incoming(edge.v0, stitcher->NextVertex()));
-
-            stitcher->Break();
-            Subdivide(stitcher, edge);
-          }
-
-          if (ans.boundary.b1) {  // outgoing
-            Subdivide(stitcher, edge);
-            stitcher->Break();
-
-            crossings.push_back(  //
-              Crossing::Outgoing(edge.v1, stitcher->LastVertex()));
-          }
-
+          stitcher->Break();
+          Subdivide(stitcher, {result.point[0], edge.v1});
           break;
         }
 
+        case ClipResult::kCrop1: {  // outgoing
+          Subdivide(stitcher, {edge.v0, result.point[1]});
+          stitcher->Break();
+
+          crossings.push_back(  //
+              Crossing::Outgoing(result.point[1], stitcher->LastVertex()));
+          break;
+        }
+
+        // One or the other vertex needs to be snapped to a boundary.
+        case ClipResult::kSnap0: {  // incoming
+          crossings.push_back(  //
+            Crossing::Incoming(edge.v0, stitcher->NextVertex()));
+
+          stitcher->Break();
+          Subdivide(stitcher, edge);
+          break;
+        }
+
+        case ClipResult::kSnap1: {  // outgoing
+          Subdivide(stitcher, edge);
+          stitcher->Break();
+
+          crossings.push_back(  //
+              Crossing::Outgoing(edge.v1, stitcher->LastVertex()));
+          break;
+        }
+
+        // The other cases shouldn't happen.
         default:
           ABSL_UNREACHABLE();
       }

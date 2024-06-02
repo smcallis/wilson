@@ -51,83 +51,225 @@ struct BoundaryPair {
 //
 //   KEEP - Keep the edge as-is, it can be subdivided normally.
 //
-//   SNAP - One vertex or the other needs to be snapped to a boundary of the
-//     projection.  One field of boundary will be set with the boundary to
-//     snap the respective vertex to.
+//   CROP[N] - One or both edge vertices need to be replaced by other points.
 //
-//   CHOP - The edge has to be broken due to wrapping across the anti-meridian
-//    in this case, isect is set to the intersection point where the edge
-//    crossed the anti-meridian.  The edge should be broken into two segments:
+//   SNAP[N] - One or both edge vertices need to be snapped to a boundary of the
+//     projection.  One field of boundary will be set with the boundary to snap
+//     the respective vertex to.
 //
-//      {edge.v0, isect} - with isect snapped to boundary.b0
-//      {isect, edge.v1} - with isect snapped to boundary.b1
-//
+//   SPLIT - The edge must be split in two at point[0].
 struct ClipResult {
-  enum Status {
-    kKeep, kDrop, kSnap, kChop
+  enum Action {
+    kKeep,   // Keep the edge in its entirety.
+    kDrop,   // Drop the edge in its entirety.
+    kSnap0,  // Snap vertex 0 to boundary[0] of the projection.
+    kSnap1,  // Snap vertex 1 to boundary[1] of the projection.
+    kSnap,   // Snap both vertices to the boundary of the projection.
+    kCrop0,  // Replace vertex 0 with point[0].
+    kCrop1,  // Replace vertex 1 with point[1].
+    kCrop,   // Replace both vertices with the corresponding points.
+    kSplit,  // The edge must be split into two edge at point[0].
   };
+
+  constexpr ClipResult() = default;
 
   // Returns a ClipResult indicating that the edge should be kept as-is.
   static constexpr ClipResult Keep() {
-    return {};
+    return ClipResult(kKeep);
   }
 
   // Returns a ClipResult indicating we can drop the edge altogether.
   static constexpr ClipResult Drop() {
-    return Snap({1, 1});
-  }
-
-  // Returns a ClipResult indicating v0 and v1 should be snapped.
-  static constexpr ClipResult Snap(BoundaryPair b) {
-    ClipResult result;
-    result.boundary = b;
-    return result;
+    return ClipResult(kDrop);
   }
 
   // Returns a ClipResult indicating v0 should be snapped to the boundary.
-  static constexpr ClipResult Snap0(uint8_t b0 = 1) {
-    return ClipResult::Snap(BoundaryPair::Snap0(b0));
+  static constexpr ClipResult Snap0(uint8_t b0 = 0) {
+    ClipResult result(kSnap0);
+    result.boundary[0] = b0;
+    return result;
   }
 
   // Returns a ClipResult indicating v1 should be snapped to the boundary.
-  static constexpr ClipResult Snap1(uint8_t b1 = 1) {
-    return ClipResult::Snap(BoundaryPair::Snap1(b1));
+  static constexpr ClipResult Snap1(uint8_t b1 = 0) {
+    ClipResult result(kSnap1);
+    result.boundary[1] = b1;
+    return result;
   }
 
-  // Returns a ClipResult indicating the edge must be split in two.  A direction
-  // flag is provided opaquely to help interpret the result.
-  static constexpr ClipResult Chop(const S2Point& isect, int direction) {
-    ClipResult result;
-    result.isect = isect;
+  // Returns a ClipResult indicating both vertices should be snapped.
+  static constexpr ClipResult Snap(uint8_t b0 = 0, uint8_t b1 = 0) {
+    ClipResult result(kSnap);
+    result.boundary[0] = b0;
+    result.boundary[1] = b1;
+    return result;
+  }
+
+  // Returns a ClipResult indicating v0 should be replaced by point.
+  static constexpr ClipResult Crop0(const S2Point& p0) {
+    ClipResult result(kCrop0);
+    result.point[0] = p0;
+    return result;
+  }
+
+  // Returns a ClipResult indicating v1 should be replaced by point.
+  static constexpr ClipResult Crop1(const S2Point& p1) {
+    ClipResult result(kCrop1);
+    result.point[1] = p1;
+    return result;
+  }
+
+  // Returns a ClipResult indicating both vertices should be replaced by point.
+  static constexpr ClipResult Crop(const S2Point& p0, const S2Point& p1) {
+    ClipResult result(kCrop);
+    result.point[0] = p0;
+    result.point[1] = p1;
+    return result;
+  }
+
+  // Returns a ClipResult indicating the edge should be split.  Direction is
+  // passed through opaquely to be interpreted in a projection specific way.
+  static constexpr ClipResult Split(const S2Point& point, int8_t direction) {
+    ClipResult result(kSplit);
+    result.point[0] = point;
     result.direction = direction;
     return result;
   }
 
-  // Returns a status code indicating how to process the edge.
-  Status status() const {
-    // Chop the edge in half.
-    if (isect.has_value()) {
-      return kChop;
-    }
+  Action action;
+  int8_t direction;
+  uint8_t boundary[2];
+  S2Point point[2];
 
-    bool snap = (boundary.b0 != 0 || boundary.b1 != 0);
-    if (snap) {
-      // If we have two boundaries but they're the same, drop the edge.
-      if (boundary.b0 == boundary.b1) {
-        return kDrop;
-      }
-
-      // They're not the same, snap the vertices.
-      return kSnap;
-    }
-
-    // Keep the edge as-is.
-    return kKeep;
-  }
-
-  std::optional<S2Point> isect;
-  BoundaryPair boundary;
-  int direction = 0;
+ private:
+  explicit constexpr ClipResult(Action action) : action(action) {}
 };
+
+// // Clips an edge to an arbitrary plane and the surface of the unit sphere.
+// // Returns a ClipResult indicating how to process the edge.
+// inline ClipResult ClipEdgeToPlane(
+//   const Plane& plane, const S2Shape::Edge& edge) {
+//   // Test which side of the plane each vertex is on.
+//   const int sign0 = plane.Sign(edge.v0);
+//   const int sign1 = plane.Sign(edge.v1);
+
+//   // The edge plane will always contain the origin (the edge lies in a great
+//   // circle).  If this plane does as well, then we can simplify the intersection
+//   // logic significantly.
+//   if (plane.offset() == 0.0) {
+//     // Since the plane goes through the origin, it must bisect the sphere.  If
+//     // the vertices are both one side or the other, then the entire edge must be
+//     // or the edge would be longer than 180 degrees, which is invalid.
+//     if (sign0 == 0 || sign1 == 0 || sign0 == sign1) {
+//       return sign0 + sign1 >= 1;
+//     }
+
+//     // Different signs, the edge must cross the plane.  Just use cross products
+//     // to find the intersection point.  Swap the vertices if needed to maintain
+//     // the proper edge orientation.
+//     const auto Intersection = [&](const S2Point& a, const S2Point& b) {
+//       return S2::RobustCrossProd(
+//         plane.normal(), S2::RobustCrossProd(a, b)).Normalize();
+//     };
+
+//     if (sign0 < 0) edge.v0 = Intersection(edge.v0, edge.v1);
+//     if (sign1 < 0) edge.v1 = Intersection(edge.v1, edge.v0);
+//     return true;
+//   }
+
+//   // If both edge vertices are on the positive side of the plane then it can't
+//   // cross the plane unless the edge is more than 180 degrees, which is invalid.
+//   //
+//   // This covers cases (0, 0), (0, +), (+, 0), (+, +)
+//   if (sign0 + sign1 >= 1 || (sign0 == 0 && sign1 == 0)) {
+//     return true;
+//   }
+
+//   // Compute the normal of the plane containing the edge.
+//   const S2Point n0 = normal();
+//   const S2Point n1 = S2::RobustCrossProd(edge.v0, edge.v1).Normalize();
+
+//   // By the equation of a plane with normal N and offset O, any point P on the
+//   // plane satisfies N•P-O = 0.  Using that equation for both planes, we get a
+//   // system of two equations to solve for the line of intersection of the
+//   // planes.  Restricting that further to solutions on the unit sphere gives us
+//   // two (not necessarily antipodal) points.
+
+//   // The resulting line must be orthogonal to both planes, so the cross product
+//   // gives us the direction vector for it.
+//   const S2Point D = S2::RobustCrossProd(n0, n1).Normalize();
+
+//   // Compute the offset of the line segment.  The origin of the plane which the
+//   // edge lies in is always zero, so we can simplify by setting h1 = 0.
+//   //   See: https://en.wikipedia.org/wiki/Plane%E2%80%93plane_intersection
+//   const double nn = n0.DotProd(n1);
+//   const double h0 = offset();
+
+//   // If the planes are parallel, the intersection on the unit sphere is a
+//   // circle.  In that case return false to mark the edge as clipped away.
+//   if (1 - nn * nn <= 0) {
+//     return false;
+//   }
+
+//   const double c0 = h0/(1-nn*nn);
+//   const double c1 = (-h0*nn)/(1-nn*nn);
+//   const S2Point O = c0*n0 + c1*n1;
+
+//   // We find O as a point in the 2D space spanned by n0 and n1, which is a plane
+//   // perpendicular to both of the other planes. O must therefore be in all three
+//   // planes and is thus orthogonal to all three normals, indicating it's the
+//   // orthogonal projection of the origin onto the line of intersection.
+//   //
+//   // If we had to project the origin more than the unit distance, then the line
+//   // of intersection missed the unit sphere entirely and the edge is clipped.
+//   // Add a small epsilon to avoid juddering as the line becomes tangent to the
+//   // sphere.
+//   double disc = 1 - O.Norm2();
+//   if (disc < 1e-6) {
+//     return false;
+//   }
+
+//   // We have the parameterized equation O + t*D for the line of intersection.
+//   // We can intersect it with the unit sphere to find our points.
+//   //   See: https://en.wikipedia.org/wiki/Line%E2%80%93sphere_intersection
+//   //
+//   // Note that since O is perpendicular to all three planes, it's perpendicular
+//   // to the intersection direction D, and thus O.DotProd(D) == 0 so we can
+//   // simplify here.
+//   disc = std::sqrt(disc);
+//   double t0 = +disc;
+//   double t1 = -disc;
+
+//   // Ensure the new points are the same orientation as the edge vertices.
+//   S2Point p0 = O + t0*D;
+//   S2Point p1 = O + t1 * D;
+//   if (s2pred::Sign(p0, p1, n1) < 0) {
+//     std::swap(p0, p1);
+//   }
+
+//   // If both vertices are on the negative side of the plane, then the edge
+//   // crosses it in zero or two places.  We can distinguish the two cases by
+//   // ensuring that the intersection points in the arc of the edge.
+//   //
+//   // This covers case (-, -).
+//   if (sign0 < 0 && sign1 < 0) {
+//     if (!s2pred::OrderedCCW(edge.v0, p0, edge.v1, n1)) {
+//       return false;
+//     }
+
+//     edge.v0 = p0;
+//     edge.v1 = p1;
+//     return true;
+//   }
+
+//   // Finally, only one vertex is on the negative side of the plane.  Replace it
+//   // with its corresponding intersection point.
+//   //
+//   // This covers cases (+, -), (-, +), (0, -) and (-, 0)
+//   if (sign0 < 0) edge.v0 = p0;
+//   if (sign1 < 0) edge.v1 = p1;
+//   return true;
+// }
+
 
 }  // namespace w
