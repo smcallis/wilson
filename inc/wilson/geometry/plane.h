@@ -24,14 +24,16 @@
 
 namespace w {
 
-// Class to represent planes in three dimensions in Hessian normal form.  Planes
-// in this form are specified by a normal vector, n, and the minimum distance
-// from the plane to the origin, called the offset, o.   Points that satisfy
-// n•p - o = 0 are defined to be on the plane.
+// Class representing a plane in three dimensions. Planes are modeled using
+// Hessian normal form.  Planes in this form are specified by a normal vector,
+// n, and the minimum distance from the plane to the origin, called the offset,
+// o.  Points that satisfy n•p - o = 0 are defined to be on the plane.  Planes
+// are oriented so they they have a positive and negative side, corresponding to
+// points satisfying n•p - o > 0 and n•p - o < 0, respectively.
 struct Plane {
   Plane() = default;
 
-  // Constructs a new plane with the given normal vector and offset.
+  // Constructs a new plane from a normal vector and offset.
   //
   // The normal must be a unit vector and the offset range is [0, 1].
   Plane(const S2Point& normal, double offset = 0)
@@ -62,8 +64,8 @@ struct Plane {
     // slightly out of an abundance of caution.
     const double kMaxAbsError = 7.2165e-16;
 
-    // Try to compute the sign using normal double precision.  If the point is
-    // too close to the plane, then fall back to exact arithmetic.
+    // Try to compute the sign using double precision.  If the point is too
+    // close to the plane, then fall back to exact arithmetic.
     const double value = point.DotProd(normal()) - offset();
     if (std::fabs(value) <= kMaxAbsError) {
       Vector3_xf nxf = Vector3_xf::Cast(normal());
@@ -72,14 +74,13 @@ struct Plane {
       return (nxf.DotProd(pxf) - oxf).sgn();
     }
 
-    // Value was far enough to one side of the plane we can rely on it.
     DCHECK_NE(value, 0);
     return value > 0 ? +1 : -1;
   }
 
-  // Clips an S2Shape edge to the positive side of the plane, restricted to the
-  // surface of the unit sphere.  Returns true if any of the edge survived
-  // clipping, false otherwise.
+  // Clips an edge to the positive side of the plane, restricted to the surface
+  // of the unit sphere.  Returns true if any of the edge survived clipping,
+  // false otherwise.
   //
   // The two vertices of an edge define a plane, which we can intersect with
   // this plane. The intersection of two non-parallel planes is always a line,
@@ -105,9 +106,9 @@ inline bool Plane::ClipEdgeOnSphere(S2Shape::Edge& edge) const {
   const int sign0 = Sign(edge.v0);
   const int sign1 = Sign(edge.v1);
 
-  // The edge plane will always contain the origin (it's a great circle).  If
-  // this plane does as well, then we can simplify the intersection logic
-  // significantly.
+  // The edge plane will always contain the origin (the edge lies in a great
+  // circle).  If this plane does as well, then we can simplify the intersection
+  // logic significantly.
   if (offset() == 0.0) {
     // Since the plane goes through the origin, it must bisect the sphere.  If
     // the vertices are both one side or the other, then the entire edge must be
@@ -120,7 +121,7 @@ inline bool Plane::ClipEdgeOnSphere(S2Shape::Edge& edge) const {
     // to find the intersection points.  Swap the vertices if needed to maintain
     // the proper edge orientation.
     const auto Intersection = [&](const S2Point& a, const S2Point& b) {
-      return //
+      return
         S2::RobustCrossProd(normal(), S2::RobustCrossProd(a, b)).Normalize();
     };
 
@@ -137,9 +138,7 @@ inline bool Plane::ClipEdgeOnSphere(S2Shape::Edge& edge) const {
     return true;
   }
 
-  // Compute the normal of the plane containing the edge.  Edges are always on
-  // great circles, which means the plane goes through the origin and thus the
-  // origin is always zero.
+  // Compute the normal of the plane containing the edge.
   const S2Point n0 = normal();
   const S2Point n1 = S2::RobustCrossProd(edge.v0, edge.v1).Normalize();
 
