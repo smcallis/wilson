@@ -714,6 +714,7 @@ public:
       if (event.key.keysym.sym == SDLK_0) {
         // Reset rotation to default.
         Quaternion rotation({0, 1, 0}, 0.0);
+        projection_->SetScale(kMinScale);
         projection_->SetRotation(rotation);
         inset_.SetRotation(rotation);
         dirty_.SetAll(true);
