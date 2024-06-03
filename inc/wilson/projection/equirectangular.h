@@ -364,15 +364,15 @@ private:
         // appropriate boundary.
         if (sign0 == 0) {
           sign0 = s2pred::SignDotProd(edge.v0, ampole_);
-          if (sign0 > 0) return ClipResult::Snap0(kNorth);
-          if (sign0 < 0) return ClipResult::Snap0(kSouth);
+          if (sign0 > 0) return ClipResult::Crop0(edge.v0, kNorth);
+          if (sign0 < 0) return ClipResult::Crop0(edge.v0, kSouth);
           ABSL_UNREACHABLE(); // v0 would have to be at the origin.
         }
 
         if (sign1 == 0) {
           sign1 = s2pred::SignDotProd(edge.v1, ampole_);
-          if (sign1 > 0) return ClipResult::Snap1(kNorth);
-          if (sign1 < 0) return ClipResult::Snap1(kSouth);
+          if (sign1 > 0) return ClipResult::Crop1(edge.v1, kNorth);
+          if (sign1 < 0) return ClipResult::Crop1(edge.v1, kSouth);
           ABSL_UNREACHABLE(); // v1 would have to be at the origin.
         }
 
@@ -385,15 +385,15 @@ private:
 
         if (sign0 > 0) {
           DCHECK_LT(sign1, 0);
-          if (midsign > 0) return ClipResult::Snap0(kNorth);
-          if (midsign < 0) return ClipResult::Snap0(kSouth);
+          if (midsign > 0) return ClipResult::Crop0(edge.v0, kNorth);
+          if (midsign < 0) return ClipResult::Crop0(edge.v0, kSouth);
           ABSL_UNREACHABLE();
         }
 
         if (sign1 > 0) {
           DCHECK_LT(sign0, 0);
-          if (midsign > 0) return ClipResult::Snap1(kNorth);
-          if (midsign < 0) return ClipResult::Snap1(kSouth);
+          if (midsign > 0) return ClipResult::Crop1(edge.v1, kNorth);
+          if (midsign < 0) return ClipResult::Crop1(edge.v1, kSouth);
           ABSL_UNREACHABLE();
         }
       }
@@ -408,8 +408,8 @@ private:
     if (sign0 == 0) {
       DCHECK_NE(sign1, 0);
       if (InAmHemisphere(edge.v0)) {
-        if (sign1 < 0) return ClipResult::Snap0(kWest);
-        if (sign1 > 0) return ClipResult::Snap0(kEast);
+        if (sign1 < 0) return ClipResult::Crop0(edge.v0, kWest);
+        if (sign1 > 0) return ClipResult::Crop0(edge.v0, kEast);
         ABSL_UNREACHABLE();
       }
       return ClipResult::Keep();
@@ -421,8 +421,8 @@ private:
     if (sign1 == 0) {
       DCHECK_NE(sign0, 0);
       if (InAmHemisphere(edge.v1)) {
-        if (sign0 < 0) return ClipResult::Snap1(kWest);
-        if (sign0 > 0) return ClipResult::Snap1(kEast);
+        if (sign0 < 0) return ClipResult::Crop1(edge.v1, kWest);
+        if (sign0 > 0) return ClipResult::Crop1(edge.v1, kEast);
         ABSL_UNREACHABLE();
       }
       return ClipResult::Keep();
@@ -478,13 +478,13 @@ inline void Equirectangular::Project(absl::Nonnull<R2VertexSink*> out,
     }
 
     // One or the other vertex needs to be snapped to a boundary.
-    case ClipResult::kSnap0: {
+    case ClipResult::kCrop0: {
       out->Break();
       Subdivide(out, edge, BoundaryPair::Snap0(result.boundary[0]));
       return;
     }
 
-    case ClipResult::kSnap1: {
+    case ClipResult::kCrop1: {
       Subdivide(out, edge, BoundaryPair::Snap1(result.boundary[1]));
       out->Break();
       return;
@@ -548,11 +548,11 @@ inline void Equirectangular::Project(  //
         }
 
         // We need to snap one vertex or the other.
-        case ClipResult::kSnap0:
+        case ClipResult::kCrop0:
           Subdivide(out, edge, BoundaryPair::Snap0(result.boundary[0]));
           break;
 
-        case ClipResult::kSnap1:
+        case ClipResult::kCrop1:
           Subdivide(out, edge, BoundaryPair::Snap1(result.boundary[1]));
           break;
 
@@ -623,7 +623,7 @@ inline void Equirectangular::Project(absl::Nonnull<R2VertexSink*> out,
         }
 
         // We need to snap one vertex or the other.
-        case ClipResult::kSnap0: {
+        case ClipResult::kCrop0: {
           const uint8_t b0 = result.boundary[0];
           const int next = stitcher->NextVertex();
           Subdivide(stitcher, edge, BoundaryPair::Snap0(b0));
@@ -635,7 +635,7 @@ inline void Equirectangular::Project(absl::Nonnull<R2VertexSink*> out,
           break;
         }
 
-        case ClipResult::kSnap1: {
+        case ClipResult::kCrop1: {
           const uint8_t b1 = result.boundary[1];
           Subdivide(stitcher, edge, BoundaryPair::Snap1(b1));
 

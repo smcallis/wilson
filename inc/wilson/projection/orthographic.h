@@ -309,14 +309,14 @@ protected:
     // plane, then mark it as needing snapped on the given vertex.
     if (sign0 == 0) {
       if (sign1 > 0) {
-        return ClipResult::Snap0();
+        return ClipResult::Crop0(edge.v0);
       }
       return ClipResult::Drop();
     }
 
     if (sign1 == 0) {
       if (sign0 > 0) {
-        return ClipResult::Snap1();
+        return ClipResult::Crop1(edge.v1);
       }
       return ClipResult::Drop();
     }
@@ -515,19 +515,6 @@ inline void Orthographic::Project(absl::Nonnull<R2VertexSink*> out,
       return;
     }
 
-      // One or the other vertex needs to be snapped to a boundary.
-    case ClipResult::kSnap0: {  // incoming
-      out->Break();
-      Subdivide(out, edge);
-      return;
-    }
-
-    case ClipResult::kSnap1: {  // outgoing
-      Subdivide(out, edge);
-      out->Break();
-      return;
-    }
-
     // The other cases should never happen.
     default:
       ABSL_UNREACHABLE();
@@ -583,19 +570,6 @@ inline void Orthographic::Project(  //
 
         case ClipResult::kCrop1: {  // outgoing
           Subdivide(out, {edge.v0, result.point[1]});
-          out->Break();
-          break;
-        }
-
-        // One or the other vertex needs to be snapped to a boundary.
-        case ClipResult::kSnap0: {  // incoming
-          out->Break();
-          Subdivide(out, edge);
-          break;
-        }
-
-        case ClipResult::kSnap1: {  // outgoing
-          Subdivide(out, edge);
           out->Break();
           break;
         }
@@ -697,25 +671,6 @@ inline void Orthographic::Project(absl::Nonnull<R2VertexSink*> out,
 
           crossings.push_back(  //
               Crossing::Outgoing(result.point[1], stitcher->LastVertex()));
-          break;
-        }
-
-        // One or the other vertex needs to be snapped to a boundary.
-        case ClipResult::kSnap0: {  // incoming
-          crossings.push_back(  //
-            Crossing::Incoming(edge.v0, stitcher->NextVertex()));
-
-          stitcher->Break();
-          Subdivide(stitcher, edge);
-          break;
-        }
-
-        case ClipResult::kSnap1: {  // outgoing
-          Subdivide(stitcher, edge);
-          stitcher->Break();
-
-          crossings.push_back(  //
-              Crossing::Outgoing(edge.v1, stitcher->LastVertex()));
           break;
         }
 

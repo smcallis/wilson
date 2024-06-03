@@ -53,24 +53,18 @@ struct BoundaryPair {
 //
 //   KEEP - Keep the edge as-is, it can be subdivided normally.
 //
-//   CROP[N] - One or both edge vertices need to be replaced by other points.
-//
-//   SNAP[N] - One or both edge vertices need to be snapped to a boundary of the
-//     projection.  One field of boundary will be set with the boundary to snap
-//     the respective vertex to.
+//   CROP[N] - The edge crossed boundary[N] and vertex N of the edge should be
+//     replaced with point[N].
 //
 //   SPLIT - The edge must be split in two at point[0].
 struct ClipResult {
   enum Action {
-    kKeep,   // Keep the edge in its entirety.
-    kDrop,   // Drop the edge in its entirety.
-    kSnap0,  // Snap vertex 0 to boundary[0] of the projection.
-    kSnap1,  // Snap vertex 1 to boundary[1] of the projection.
-    kSnap,   // Snap both vertices to the boundary of the projection.
-    kCrop0,  // Replace vertex 0 with point[0].
-    kCrop1,  // Replace vertex 1 with point[1].
-    kCrop,   // Replace both vertices with the corresponding points.
-    kSplit,  // The edge must be split into two edge at point[0].
+    kDrop  = 0b000,  // Drop the edge in its entirety.
+    kKeep  = 0b001,  // Keep the edge in its entirety.
+    kCrop0 = 0b010,  // Edge crossed boundary[0], replace v0 with point[0]
+    kCrop1 = 0b100,  // Edge crossed boundary[1], replace v1 with point[1]
+    kCrop  = 0b110,  // Both v0 and v1 must be replaced.
+    kSplit = 0b111,  // The edge must be split into two edge at point[0].
   };
 
   constexpr ClipResult() = default;
@@ -85,47 +79,30 @@ struct ClipResult {
     return ClipResult(kDrop);
   }
 
-  // Returns a ClipResult indicating v0 should be snapped to the boundary.
-  static constexpr ClipResult Snap0(uint8_t b0 = 0) {
-    ClipResult result(kSnap0);
-    result.boundary[0] = b0;
-    return result;
-  }
-
-  // Returns a ClipResult indicating v1 should be snapped to the boundary.
-  static constexpr ClipResult Snap1(uint8_t b1 = 0) {
-    ClipResult result(kSnap1);
-    result.boundary[1] = b1;
-    return result;
-  }
-
-  // Returns a ClipResult indicating both vertices should be snapped.
-  static constexpr ClipResult Snap(uint8_t b0 = 0, uint8_t b1 = 0) {
-    ClipResult result(kSnap);
-    result.boundary[0] = b0;
-    result.boundary[1] = b1;
-    return result;
-  }
-
   // Returns a ClipResult indicating v0 should be replaced by point.
-  static constexpr ClipResult Crop0(const S2Point& p0) {
+  static constexpr ClipResult Crop0(const S2Point& p0, uint8_t b0 = 0) {
     ClipResult result(kCrop0);
     result.point[0] = p0;
+    result.boundary[0] = b0;
     return result;
   }
 
   // Returns a ClipResult indicating v1 should be replaced by point.
-  static constexpr ClipResult Crop1(const S2Point& p1) {
+  static constexpr ClipResult Crop1(const S2Point& p1, uint8_t b1 = 0) {
     ClipResult result(kCrop1);
     result.point[1] = p1;
+    result.boundary[1] = b1;
     return result;
   }
 
   // Returns a ClipResult indicating both vertices should be replaced by point.
-  static constexpr ClipResult Crop(const S2Point& p0, const S2Point& p1) {
+  static constexpr ClipResult Crop(
+    const S2Point& p0, const S2Point& p1, uint8_t b0 = 0, uint8_t b1 = 0) {
     ClipResult result(kCrop);
     result.point[0] = p0;
     result.point[1] = p1;
+    result.boundary[0] = b0;
+    result.boundary[1] = b1;
     return result;
   }
 
@@ -150,7 +127,8 @@ struct ClipResult {
 // Clips an edge to a small circle on the unit sphere, represented as the
 // positive side of a plane.
 //
-// Returns a ClipResult indicating how to process the edge.
+// Returns a ClipResult indicating how to process the edge.  The edge may be
+// kept, dropped, or cropped, but will never be split.
 //
 // If the edge doesn't hit the unit sphere, or the edge is exactly co-linear
 // with the plane, the intersection either doesn't exist, or becomes a circle,
@@ -295,18 +273,18 @@ inline bool ClipEdgeToSmallCircle(const Plane& plane, S2Shape::Edge& edge) {
     case ClipResult::kDrop:
       return false;
 
-    case ClipResult::kCrop0:
-      edge.v0 = result.point[0];
-      return true;
+    case ClipResult::kCrop0: // Fallthrough
+    case ClipResult::kCrop1: // Fallthrough
+    case ClipResult::kCrop: {
+      if (result.action & ClipResult::kCrop0) {
+        edge.v0 = result.point[0];
+      }
 
-    case ClipResult::kCrop1:
-      edge.v1 = result.point[1];
+      if (result.action & ClipResult::kCrop1) {
+        edge.v1 = result.point[1];
+      }
       return true;
-
-    case ClipResult::kCrop:
-      edge.v0 = result.point[0];
-      edge.v1 = result.point[1];
-      return true;
+    }
 
     // The other cases can't happen.
     default:
