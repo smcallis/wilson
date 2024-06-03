@@ -17,8 +17,10 @@
 #include <cstdint>
 #include <optional>
 
+#include "absl/base/optimization.h"
 #include "s2/r2.h"
 #include "s2/s2point.h"
+#include "wilson/geometry/plane.h"
 
 namespace w {
 
@@ -145,131 +147,173 @@ struct ClipResult {
   explicit constexpr ClipResult(Action action) : action(action) {}
 };
 
-// // Clips an edge to an arbitrary plane and the surface of the unit sphere.
-// // Returns a ClipResult indicating how to process the edge.
-// inline ClipResult ClipEdgeToPlane(
-//   const Plane& plane, const S2Shape::Edge& edge) {
-//   // Test which side of the plane each vertex is on.
-//   const int sign0 = plane.Sign(edge.v0);
-//   const int sign1 = plane.Sign(edge.v1);
+// Clips an edge to a small circle on the unit sphere, represented as the
+// positive side of a plane.
+//
+// Returns a ClipResult indicating how to process the edge.
+//
+// If the edge doesn't hit the unit sphere, or the edge is exactly co-linear
+// with the plane, the intersection either doesn't exist, or becomes a circle,
+// respectively.  In either case we return ClipResult::Drop() indicating the
+// edge should be clipped away.
+inline ClipResult ClipToSmallCircle(
+  const Plane& plane, const S2Shape::Edge& edge) {
+  // Test which side of the plane each vertex is on.
+  const int sign0 = plane.Sign(edge.v0);
+  const int sign1 = plane.Sign(edge.v1);
 
-//   // The edge plane will always contain the origin (the edge lies in a great
-//   // circle).  If this plane does as well, then we can simplify the intersection
-//   // logic significantly.
-//   if (plane.offset() == 0.0) {
-//     // Since the plane goes through the origin, it must bisect the sphere.  If
-//     // the vertices are both one side or the other, then the entire edge must be
-//     // or the edge would be longer than 180 degrees, which is invalid.
-//     if (sign0 == 0 || sign1 == 0 || sign0 == sign1) {
-//       return sign0 + sign1 >= 1;
-//     }
+  // The edge plane will always contain the origin (the edge lies in a great
+  // circle).  If this plane does as well, then we can simplify the intersection
+  // logic significantly.
+  if (plane.offset() == 0.0) {
+    // Since the plane goes through the origin, it must bisect the sphere.  If
+    // the vertices are both on one side or the other, then the entire edge must
+    // be or the edge would be longer than 180 degrees, which is invalid.
+    if (sign0 == 0 || sign1 == 0 || sign0 == sign1) {
+      return (sign0 + sign1 >= 1) ? ClipResult::Keep() : ClipResult::Drop();
+    }
 
-//     // Different signs, the edge must cross the plane.  Just use cross products
-//     // to find the intersection point.  Swap the vertices if needed to maintain
-//     // the proper edge orientation.
-//     const auto Intersection = [&](const S2Point& a, const S2Point& b) {
-//       return S2::RobustCrossProd(
-//         plane.normal(), S2::RobustCrossProd(a, b)).Normalize();
-//     };
+    // Different signs, the edge must cross the plane.  Just use cross products
+    // to find the intersection point.  Swap the vertices if needed to maintain
+    // the proper edge orientation.
+    const auto Intersection = [&](const S2Point& a, const S2Point& b) {
+      return S2::RobustCrossProd(
+        plane.normal(), S2::RobustCrossProd(a, b)).Normalize();
+    };
 
-//     if (sign0 < 0) edge.v0 = Intersection(edge.v0, edge.v1);
-//     if (sign1 < 0) edge.v1 = Intersection(edge.v1, edge.v0);
-//     return true;
-//   }
+    if (sign0 < 0) {
+      return ClipResult::Crop0(Intersection(edge.v0, edge.v1));
+    } else {
+      return ClipResult::Crop1(Intersection(edge.v1, edge.v0));
+    }
+  }
 
-//   // If both edge vertices are on the positive side of the plane then it can't
-//   // cross the plane unless the edge is more than 180 degrees, which is invalid.
-//   //
-//   // This covers cases (0, 0), (0, +), (+, 0), (+, +)
-//   if (sign0 + sign1 >= 1 || (sign0 == 0 && sign1 == 0)) {
-//     return true;
-//   }
+  // If both edge vertices are on the positive side of the plane then it can't
+  // cross the plane unless the edge is more than 180 degrees, which is invalid.
+  //
+  // This covers cases (0, 0), (0, +), (+, 0), (+, +)
+  if (sign0 + sign1 >= 1 || (sign0 == 0 && sign1 == 0)) {
+    return ClipResult::Keep();
+  }
 
-//   // Compute the normal of the plane containing the edge.
-//   const S2Point n0 = normal();
-//   const S2Point n1 = S2::RobustCrossProd(edge.v0, edge.v1).Normalize();
+  // Compute the normal of the plane containing the edge.
+  const S2Point n0 = plane.normal();
+  const S2Point n1 = S2::RobustCrossProd(edge.v0, edge.v1).Normalize();
 
-//   // By the equation of a plane with normal N and offset O, any point P on the
-//   // plane satisfies N•P-O = 0.  Using that equation for both planes, we get a
-//   // system of two equations to solve for the line of intersection of the
-//   // planes.  Restricting that further to solutions on the unit sphere gives us
-//   // two (not necessarily antipodal) points.
+  // By the equation of a plane with normal N and offset O, any point P on the
+  // plane satisfies N•P-O = 0.  Using that equation for both planes, we get a
+  // system of two equations to solve for the line of intersection of the
+  // planes.  Restricting that further to solutions on the unit sphere gives us
+  // two (not necessarily antipodal) points.
 
-//   // The resulting line must be orthogonal to both planes, so the cross product
-//   // gives us the direction vector for it.
-//   const S2Point D = S2::RobustCrossProd(n0, n1).Normalize();
+  // The resulting line must be orthogonal to both planes, so the cross product
+  // gives us the direction vector for it.
+  const S2Point D = S2::RobustCrossProd(n0, n1).Normalize();
 
-//   // Compute the offset of the line segment.  The origin of the plane which the
-//   // edge lies in is always zero, so we can simplify by setting h1 = 0.
-//   //   See: https://en.wikipedia.org/wiki/Plane%E2%80%93plane_intersection
-//   const double nn = n0.DotProd(n1);
-//   const double h0 = offset();
+  // Compute the offset of the line segment.  The origin of the plane which the
+  // edge lies in is always zero, so we can simplify by setting h1 = 0.
+  //   See: https://en.wikipedia.org/wiki/Plane%E2%80%93plane_intersection
+  const double nn = n0.DotProd(n1);
+  const double h0 = plane.offset();
 
-//   // If the planes are parallel, the intersection on the unit sphere is a
-//   // circle.  In that case return false to mark the edge as clipped away.
-//   if (1 - nn * nn <= 0) {
-//     return false;
-//   }
+  // If the planes are parallel, the intersection on the unit sphere is a
+  // circle.  In that case return false to mark the edge as clipped away.
+  if (1 - nn * nn <= 0) {
+    return ClipResult::Drop();
+  }
 
-//   const double c0 = h0/(1-nn*nn);
-//   const double c1 = (-h0*nn)/(1-nn*nn);
-//   const S2Point O = c0*n0 + c1*n1;
+  const double c0 = h0/(1-nn*nn);
+  const double c1 = (-h0*nn)/(1-nn*nn);
+  const S2Point O = c0*n0 + c1*n1;
 
-//   // We find O as a point in the 2D space spanned by n0 and n1, which is a plane
-//   // perpendicular to both of the other planes. O must therefore be in all three
-//   // planes and is thus orthogonal to all three normals, indicating it's the
-//   // orthogonal projection of the origin onto the line of intersection.
-//   //
-//   // If we had to project the origin more than the unit distance, then the line
-//   // of intersection missed the unit sphere entirely and the edge is clipped.
-//   // Add a small epsilon to avoid juddering as the line becomes tangent to the
-//   // sphere.
-//   double disc = 1 - O.Norm2();
-//   if (disc < 1e-6) {
-//     return false;
-//   }
+  // We find O as a point in the 2D space spanned by n0 and n1, which is a plane
+  // perpendicular to both of the other planes. O must therefore be in all three
+  // planes and is thus orthogonal to all three normals, indicating it's the
+  // orthogonal projection of the origin onto the line of intersection.
+  //
+  // If we had to project the origin more than the unit distance, then the line
+  // of intersection missed the unit sphere entirely and the edge is clipped.
+  // Add a small epsilon to avoid juddering as the line becomes tangent to the
+  // sphere.
+  double disc = 1 - O.Norm2();
+  if (disc < 1e-6) {
+    return ClipResult::Drop();
+  }
 
-//   // We have the parameterized equation O + t*D for the line of intersection.
-//   // We can intersect it with the unit sphere to find our points.
-//   //   See: https://en.wikipedia.org/wiki/Line%E2%80%93sphere_intersection
-//   //
-//   // Note that since O is perpendicular to all three planes, it's perpendicular
-//   // to the intersection direction D, and thus O.DotProd(D) == 0 so we can
-//   // simplify here.
-//   disc = std::sqrt(disc);
-//   double t0 = +disc;
-//   double t1 = -disc;
+  // We have the parameterized equation O + t*D for the line of intersection.
+  // We can intersect it with the unit sphere to find our points.
+  //   See: https://en.wikipedia.org/wiki/Line%E2%80%93sphere_intersection
+  //
+  // Note that since O is perpendicular to all three planes, it's perpendicular
+  // to the intersection direction D, and thus O.DotProd(D) == 0 so we can
+  // simplify here.
+  disc = std::sqrt(disc);
+  double t0 = +disc;
+  double t1 = -disc;
 
-//   // Ensure the new points are the same orientation as the edge vertices.
-//   S2Point p0 = O + t0*D;
-//   S2Point p1 = O + t1 * D;
-//   if (s2pred::Sign(p0, p1, n1) < 0) {
-//     std::swap(p0, p1);
-//   }
+  // Ensure the new points are the same orientation as the edge vertices.
+  S2Point p0 = O + t0*D;
+  S2Point p1 = O + t1 * D;
+  if (s2pred::Sign(p0, p1, n1) < 0) {
+    std::swap(p0, p1);
+  }
 
-//   // If both vertices are on the negative side of the plane, then the edge
-//   // crosses it in zero or two places.  We can distinguish the two cases by
-//   // ensuring that the intersection points in the arc of the edge.
-//   //
-//   // This covers case (-, -).
-//   if (sign0 < 0 && sign1 < 0) {
-//     if (!s2pred::OrderedCCW(edge.v0, p0, edge.v1, n1)) {
-//       return false;
-//     }
+  // If both vertices are on the negative side of the plane, then the edge
+  // crosses it in zero or two places.  We can distinguish the two cases by
+  // ensuring that the intersection points are in the arc of the edge.
+  //
+  // This covers case (-, -).
+  if (sign0 < 0 && sign1 < 0) {
+    if (!s2pred::OrderedCCW(edge.v0, p0, edge.v1, n1)) {
+      return ClipResult::Drop();
+    }
+    return ClipResult::Crop(p0, p1);
+  }
 
-//     edge.v0 = p0;
-//     edge.v1 = p1;
-//     return true;
-//   }
+  // Finally, only one vertex is on the negative side of the plane.  Replace it
+  // with its corresponding intersection point.
+  //
+  // This covers cases (+, -), (-, +), (0, -) and (-, 0)
+  if (sign0 < 0) {
+    return ClipResult::Crop0(p0);
+  }
+  return ClipResult::Crop1(p1);
+}
 
-//   // Finally, only one vertex is on the negative side of the plane.  Replace it
-//   // with its corresponding intersection point.
-//   //
-//   // This covers cases (+, -), (-, +), (0, -) and (-, 0)
-//   if (sign0 < 0) edge.v0 = p0;
-//   if (sign1 < 0) edge.v1 = p1;
-//   return true;
-// }
+// Convenience wrapper around the above that actually modifies the provided
+// edge. The new vertices of the edge are promised to be computed such that the
+// orientation of the edge as v0.CrossProd(v1) is unchanged.
+//
+// Returns true if any of the edge survived clipping.
+inline bool ClipEdgeToSmallCircle(const Plane& plane, S2Shape::Edge& edge) {
+  ClipResult result = ClipToSmallCircle(plane, edge);
+
+  switch (result.action) {
+    case ClipResult::kKeep:
+      return true;
+
+    case ClipResult::kDrop:
+      return false;
+
+    case ClipResult::kCrop0:
+      edge.v0 = result.point[0];
+      return true;
+
+    case ClipResult::kCrop1:
+      edge.v1 = result.point[1];
+      return true;
+
+    case ClipResult::kCrop:
+      edge.v0 = result.point[0];
+      edge.v1 = result.point[1];
+      return true;
+
+    // The other cases can't happen.
+    default:
+      ABSL_UNREACHABLE();
+  }
+  ABSL_UNREACHABLE();
+}
 
 
 }  // namespace w

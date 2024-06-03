@@ -18,6 +18,7 @@
 #include "s2/s2cell.h"
 
 #include "wilson/projection/projection.h"
+#include "wilson/projection/clipping.h"
 #include "wilson/geometry/plane.h"
 
 namespace w {
@@ -38,7 +39,7 @@ inline void S2Graticule(
 
   // Projects and subdivides an S2Shape edge and appends it to the path.
   const auto AppendEdgeToShape = [&](S2Shape::Edge edge) {
-    if (!clip_cap || clip.ClipEdgeOnSphere(edge)) {
+    if (!clip_cap || ClipEdgeToSmallCircle(clip, edge)) {
       proj.Project(out, edge);
       out->Break();
     }
