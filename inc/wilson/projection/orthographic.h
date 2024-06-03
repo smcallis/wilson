@@ -736,16 +736,16 @@ inline void Orthographic::Project(absl::Nonnull<R2VertexSink*> out,
   DCHECK(crossings.size() % 2 == 0);
 
   // Usually there's no crossings.  The polygon must entirely contain or not
-  // contain the boundary of the projection.  Test the north pole to break the
-  // tie.  If the boundary is contained, emit the outline as a shell first, then
-  // we can emit the polygon chains.
+  // contain the boundary of the projection.  Test a point on the outline to
+  // break the tie.  If the boundary is contained, emit the outline as a shell
+  // first, then we can emit the polygon chains.
   if (ABSL_PREDICT_TRUE(crossings.empty())) {
     if (contains(Nadir().Ortho())) {
       MakeOutline(out);
     }
 
     if (!stitcher->EmitChains(AddChain)) {
-      fprintf(stderr, "[Equirectangular] Saw infinite loop splicing chains!\n");
+      fprintf(stderr, "[Orthographic] Saw infinite loop splicing chains!\n");
     }
     return;
   }
