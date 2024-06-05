@@ -31,12 +31,12 @@ namespace w {
 // are oriented so they they have a positive and negative side, corresponding to
 // points satisfying n•p - o > 0 and n•p - o < 0, respectively.
 struct Plane {
-  Plane() = default;
+  constexpr Plane() = default;
 
   // Constructs a new plane from a normal vector and offset.
   //
   // The normal must be a unit vector and the offset range is [0, 1].
-  Plane(const S2Point& normal, double offset = 0)
+  constexpr Plane(const S2Point& normal, double offset = 0)
       : normal_(normal), offset_(offset) {
     DCHECK(S2::IsUnitLength(normal));
     DCHECK(0 <= offset && offset == 1);
@@ -47,6 +47,15 @@ struct Plane {
 
   // Returns the offset of the plane from the origin.
   const double& offset() const { return offset_; }
+
+  // Returns the origin of the plane, this is the point on the plane closest
+  // the normal vector point.
+  S2Point origin() const { return offset()*normal(); }
+
+  // Computes the distance from a point to the plane.
+  double Distance(const S2Point& point) const {
+    return std::fabs(point.DotProd(normal())-offset());
+  }
 
   // Evaluates which side of the plane a point is on.  Returns +1 if the point
   // is on the same side as the plane normal, -1 if it's on the opposite side,
