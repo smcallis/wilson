@@ -34,7 +34,7 @@ inline void S2Graticule(
   // Clip edges to the spherical cap bounding the viewport.  This will prevent
   // us from trying to subdivide parts of edges that aren't visible.
   S2Cap cap = proj.Viewcap();
-  Plane clip(cap.center(), (1-cap.height()));
+  Plane clip = Plane::FromSubcenter(cap.center()*(1-cap.height()));
   bool clip_cap = cap.radius() < S1ChordAngle::Right();
 
   // Projects and subdivides an S2Shape edge and appends it to the path.

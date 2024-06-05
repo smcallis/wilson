@@ -14,12 +14,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <cmath>
 #include <cstdint>
 #include <optional>
 
 #include "absl/base/optimization.h"
 #include "s2/r2.h"
 #include "s2/s2point.h"
+#include "s2/s2edge_crossings.h"
+
 #include "wilson/geometry/plane.h"
 
 namespace w {
@@ -125,7 +128,8 @@ struct ClipResult {
 };
 
 // Clips an edge to a small circle on the unit sphere, represented as the
-// positive side of a plane.
+// inferior side of a plane. (This is the side of the plane that does not
+// contain the origin, and thus contains a smaller piece of the unit sphere).
 //
 // Returns a ClipResult indicating how to process the edge.  The edge may be
 // kept, dropped, or cropped, but will never be split.
@@ -137,33 +141,14 @@ struct ClipResult {
 inline ClipResult ClipToSmallCircle(
   const Plane& plane, const S2Shape::Edge& edge) {
   // Test which side of the plane each vertex is on.
-  const int sign0 = plane.Sign(edge.v0);
-  const int sign1 = plane.Sign(edge.v1);
+  int sign0 = plane.Sign(edge.v0);
+  int sign1 = plane.Sign(edge.v1);
 
-  // The edge plane will always contain the origin (the edge lies in a great
-  // circle).  If this plane does as well, then we can simplify the intersection
-  // logic significantly.
-  if (plane.offset() == 0.0) {
-    // Since the plane goes through the origin, it must bisect the sphere.  If
-    // the vertices are both on one side or the other, then the entire edge must
-    // be or the edge would be longer than 180 degrees, which is invalid.
-    if (sign0 == 0 || sign1 == 0 || sign0 == sign1) {
-      return (sign0 + sign1 >= 1) ? ClipResult::Keep() : ClipResult::Drop();
-    }
-
-    // Different signs, the edge must cross the plane.  Just use cross products
-    // to find the intersection point.  Swap the vertices if needed to maintain
-    // the proper edge orientation.
-    const auto Intersection = [&](const S2Point& a, const S2Point& b) {
-      return S2::RobustCrossProd(
-        plane.normal(), S2::RobustCrossProd(a, b)).Normalize();
-    };
-
-    if (sign0 < 0) {
-      return ClipResult::Crop0(Intersection(edge.v0, edge.v1));
-    } else {
-      return ClipResult::Crop1(Intersection(edge.v1, edge.v0));
-    }
+  // If the positive side of the plane is the superior side, flip signs so that
+  // we're clipping to the inferior (smaller) side.
+  if (plane.SuperiorSign() > 0) {
+    sign0 = -sign0;
+    sign1 = -sign1;
   }
 
   // If both edge vertices are on the positive side of the plane then it can't
@@ -175,7 +160,7 @@ inline ClipResult ClipToSmallCircle(
   }
 
   // Compute the normal of the plane containing the edge.
-  const S2Point n0 = plane.normal();
+  const S2Point n0 = plane.Normal();
   const S2Point n1 = S2::RobustCrossProd(edge.v0, edge.v1).Normalize();
 
   // By the equation of a plane with normal N and offset O, any point P on the
@@ -192,7 +177,7 @@ inline ClipResult ClipToSmallCircle(
   // edge lies in is always zero, so we can simplify by setting h1 = 0.
   //   See: https://en.wikipedia.org/wiki/Plane%E2%80%93plane_intersection
   const double nn = n0.DotProd(n1);
-  const double h0 = plane.offset();
+  const double h0 = plane.Offset();
 
   // If the planes are parallel, the intersection on the unit sphere is a
   // circle.  In that case return false to mark the edge as clipped away.

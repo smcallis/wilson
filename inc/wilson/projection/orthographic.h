@@ -152,7 +152,7 @@ protected:
       Affine3::Scale({1/Scale(), 1/Scale(), -1/Scale()})
       *Affine3::Permute(-1);
 
-    nadir_plane_ = Plane(Nadir());
+    nadir_plane_ = Plane::FromNormal(Nadir());
   }
 
  private:
@@ -733,9 +733,9 @@ inline void Orthographic::Project(absl::Nonnull<R2VertexSink*> out,
     };
 
     // If we have two crossings at -exactly- the same point, we can't order the
-    // crossings by just sorting.  We'll walk around the projection from the
-    // bottom-right corner (the south pole) counter-clockwise.  The crossings
-    // should alternate between incoming and outgoing.
+    // crossings by just sorting.  We'll walk around the projection from a
+    // reference point counter-clockwise.  The crossings should alternate
+    // between incoming and outgoing.
 
     // This should happen -very- rarely, so we don't have to worry about being
     // efficient here.  When we run into duplicates then we'll just swap
