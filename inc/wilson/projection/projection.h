@@ -60,7 +60,7 @@ namespace w {
 //
 // The downside is that some projections seem 'odd' when the underlying sphere
 // has been rotated.  An easy example is the Plate carrée projection, which is
-// -highly- distorted at the poles.  As the unit sphere is rotated, this
+// highly distorted at the poles.  As the unit sphere is rotated, this
 // distortion is readily apparent.  But, this is a feature of the projection
 // itself and shouldn't be disregarded.
 //
@@ -144,6 +144,16 @@ namespace w {
 // Of the two, Projection implementations are only required to define the
 // WorldToUnit transformation (via implementations of Project()).
 //
+// Drawing
+// ───────
+//
+// One of the functions that projections must implement is MakeOutline(), which
+// appends the projection boundary in screen space to a vertex sink.  When
+// drawing the projection, it's promised that any drawing done will be clipped
+// to this outline.  Implementations are encouraged to use this to their
+// advantage where it can improve performance, e.g. by overdrawing when closing
+// polygons around the projection outline to avoid having to subdivide very
+// finely.
 
 // Builds a function that takes an S2Point and returns whether a particular
 // shape in an S2ShapeIndex contains it.  The input index must live at least
