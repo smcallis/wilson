@@ -48,8 +48,6 @@ struct Orthographic final : Projection<Orthographic> {
   }
 
   S2Cap Viewcap() const override {
-    // Note we cheat here and return a little less than 90 degrees to avoid
-    // drawing the cap -exactly- on the clip horizon.
     S2Cap cap(Nadir(), S1ChordAngle::Zero());
     for (int i = 0; i < 4; ++i) {
       S2Point corner;

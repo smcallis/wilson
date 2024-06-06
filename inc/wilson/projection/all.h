@@ -19,13 +19,16 @@
 #include "wilson/projection/projection.h"
 //#include "wilson/projection/cubic.h"
 #include "wilson/projection/equirectangular.h"
-// #include "wilson/projection/gnomonic.h"
+#include "wilson/projection/gnomonic.h"
 #include "wilson/projection/orthographic.h"
 
 ABSL_FLAG(bool, experimental_projections, false, "Enable experimental projections");
 
 namespace w {
 
+// A struct containing metadata about a projection along with a factory function
+// to create one.  This lets us store a list of available projections and
+// iterate it to e.g. display in a gui.
 struct ProjectionInfo {
   using MakeProjectionFn = absl::AnyInvocable <
       std::unique_ptr<IProjection>(Quaternion rotation, double scale) const>;
@@ -53,7 +56,7 @@ struct ProjectionInfo {
 static const ProjectionInfo kProjectionList[] = {
 //  ProjectionInfo::Create<Cubic>("Cubic", false),
   ProjectionInfo::Create<Equirectangular>("Equirectangular", false),
-  // ProjectionInfo::Create<Gnomonic>("Gnomonic", false),
+  ProjectionInfo::Create<Gnomonic>("Gnomonic", false),
   ProjectionInfo::Create<Orthographic>("Orthographic", false)
 };
 
