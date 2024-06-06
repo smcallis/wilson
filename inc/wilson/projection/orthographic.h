@@ -61,7 +61,7 @@ struct Orthographic final : Projection<Orthographic> {
 
   // Populates a path representing the outline of the sphere on screen.  May
   // encompass the entire screen.
-  void MakeOutline(absl::Nonnull<R2VertexSink*> out) const override {
+  void AppendOutline(absl::Nonnull<R2VertexSink*> out) const override {
     out->Break();
 
     // Find basis vectors for nadir plane that correspond to the axes of
@@ -694,7 +694,7 @@ inline void Orthographic::Project(absl::Nonnull<R2VertexSink*> out,
   // first, then we can emit the polygon chains.
   if (ABSL_PREDICT_TRUE(crossings.empty())) {
     if (contains(Nadir().Ortho())) {
-      MakeOutline(out);
+      AppendOutline(out);
     }
 
     if (!stitcher->EmitChains(AddChain)) {

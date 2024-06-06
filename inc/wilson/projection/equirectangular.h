@@ -91,7 +91,7 @@ struct Equirectangular final : Projection<Equirectangular> {
 
   // Populates a path representing the outline of the sphere on screen.  May
   // encompass the entire screen.
-  void MakeOutline(absl::Nonnull<R2VertexSink*> out) const override {
+  void AppendOutline(absl::Nonnull<R2VertexSink*> out) const override {
     out->Break();
     out->Append(R2Point(outline_.lo().x(), outline_.hi().y()));
     out->Append(R2Point(outline_.hi().x(), outline_.hi().y()));
@@ -666,7 +666,7 @@ inline void Equirectangular::Project(absl::Nonnull<R2VertexSink*> out,
   // we can emit the polygon chains.
   if (ABSL_PREDICT_TRUE(crossings.empty())) {
     if (contains(Unrotate({0, 0, 1}))) {
-      MakeOutline(out);
+      AppendOutline(out);
     }
 
     if (!stitcher->EmitChains(AddChain)) {

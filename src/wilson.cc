@@ -273,7 +273,7 @@ public:
 
     // Clear the on-screen outline of the sphere.
     outline_.Clear();
-    projection_->MakeOutline(&outline_);
+    projection_->AppendOutline(&outline_);
     ctx.setFillStyle(bg_color_);
     ctx.fillPath(outline_.path());
 

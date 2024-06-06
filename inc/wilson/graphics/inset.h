@@ -91,7 +91,7 @@ public:
 
     // Draw to the texture pixbuffer using a new context.
     outline_.Clear();
-    projection_->MakeOutline(&outline_);
+    projection_->AppendOutline(&outline_);
     {
       BLContext ctx;
       ctx.begin(texture_.image());

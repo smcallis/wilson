@@ -147,8 +147,8 @@ namespace w {
 // Drawing
 // ───────
 //
-// One of the functions that projections must implement is MakeOutline(), which
-// appends the projection boundary in screen space to a vertex sink.  When
+// One of the functions that projections must implement is AppendOutline(),
+// which appends the projection boundary in screen space to a vertex sink.  When
 // drawing the projection, it's promised that any drawing done will be clipped
 // to this outline.  Implementations are encouraged to use this to their
 // advantage where it can improve performance, e.g. by overdrawing when closing
@@ -301,7 +301,7 @@ public:
   //
   // Does not clear the sink before appending.  The resulting outline is
   // suitable for filling with a background color for the projection as a whole.
-  virtual void MakeOutline(absl::Nonnull<R2VertexSink*> out) const = 0;
+  virtual void AppendOutline(absl::Nonnull<R2VertexSink*> out) const = 0;
 
   // Appends a graticule showing lines of latitude and longitude to a sink.
   //

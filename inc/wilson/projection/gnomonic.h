@@ -89,7 +89,7 @@ struct Gnomonic final : Projection<Gnomonic> {
   }
 
   // Appends an outline for the projection to the given output.
-  void MakeOutline(absl::Nonnull<R2VertexSink*> out) const override {
+  void AppendOutline(absl::Nonnull<R2VertexSink*> out) const override {
     // The gnomonic projection is always a unit circle in unit space, we can
     // just multiply the radius by the scale to get the correct size.
     R2Point origin = UnitToScreen({0,0});
@@ -442,7 +442,7 @@ inline void Gnomonic::Project(absl::Nonnull<R2VertexSink*> out,
   // first, then we can emit the polygon chains.
   if (ABSL_PREDICT_TRUE(crossings.empty())) {
     if (contains(clip_plane_.u())) {
-      MakeOutline(out);
+      AppendOutline(out);
     }
 
     if (!stitcher->EmitChains(AddChain)) {
