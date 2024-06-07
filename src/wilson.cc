@@ -138,9 +138,10 @@ public:
     // inset_.SetRotation(rotation);
     // dirty_.SetAll(true);
 
-    ImGui_ImplSDL2_NewFrame();  //
-    ImGui_ImplSDLRenderer2_NewFrame();
-    ImGui::NewFrame();
+    // Start a new ImGui frame.
+    ImGui_ImplSDLRenderer2_NewFrame();  // Renderer backend
+    ImGui_ImplSDL2_NewFrame();          // SDL Backend
+    ImGui::NewFrame();                  // ImGui core
 
     if (show_sidebar_) {
       const ImGuiViewport* main_viewport = ImGui::GetMainViewport();
@@ -292,7 +293,7 @@ public:
     // ctx.fillPath(clipped1.path());
     S2CellUnion viewport;
 
-    timeit("main", [&]() {
+    timeit("OnFrame", [&]() {
       // XXX: reproject graticules.
       timeit("graticules", "Time to reproject graticules", [&]() {
         Reproject();
@@ -658,16 +659,19 @@ public:
     surface().sully();
   }
 
+  // Called after a frame is drawn.
   void AfterDraw() override {
+    // Render ImGui commands into vertex lists, and pass that data to the
+    // backend to actual render it to the window.
     ImGui::Render();
     ImGui_ImplSDLRenderer2_RenderDrawData(ImGui::GetDrawData());
   }
 
   void OnEvent(const SDL_Event& event) override {
-    ImGuiIO& io = ImGui::GetIO();
     ImGui_ImplSDL2_ProcessEvent(&event);
 
     // Filter out any capture mouse events.
+    const ImGuiIO& io = ImGui::GetIO();
     if (io.WantCaptureMouse) {
       switch (event.type) {
         case SDL_MOUSEMOTION:     // fallthrough
@@ -856,13 +860,15 @@ private:
     dirty_.SetAll(true);
   }
 
-  // Initializes ImGui to use our SDL renderer.
+  // Initializes ImGui.
   void InitImGui() {
+    // Initialize the SDL2 backend, we'll be using an SDL renderer to draw.
     if (!ImGui_ImplSDL2_InitForSDLRenderer(window(), renderer())) {
       fprintf(stderr, "Error initializing imgui\n");
       exit(-1);
     }
 
+    // Initialize the actual rendering backend with our renderer().
     if (!ImGui_ImplSDLRenderer2_Init(renderer())) {
       fprintf(stderr, "Error initializing imgui\n");
       exit(-1);

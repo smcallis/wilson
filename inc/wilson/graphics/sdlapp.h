@@ -191,8 +191,8 @@ inline void SDLApplication::CreateWindow(int w, int h, absl::string_view title) 
 
   // Create a renderer, and set it's blend mode to SDL_BLENDMODE_NONE.  This
   // will ensure we blit pixels directly without any alpha blending.
-  renderer_ = SDL_CreateRenderer(
-    window_, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC | SDL_RENDERER_TARGETTEXTURE
+  renderer_ = SDL_CreateRenderer(window_, -1,
+    SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC | SDL_RENDERER_TARGETTEXTURE
   );
 
   if (renderer_ == nullptr) {
@@ -293,40 +293,46 @@ inline void SDLApplication::DrawUpdates() {
     return;
   }
 
-  for (region2i region : compositor_.composite(composite_, primary_)) {
-    SDL_Rect rect;
-    rect.x = region.lo().x();
-    rect.y = region.lo().y();
-    rect.w = region.width();
-    rect.h = region.height();
+  timeit("DrawUpdates", [&]() {
+    timeit("composite", "Composite to texture", [&]() {
+      for (region2i region : compositor_.composite(composite_, primary_)) {
+        SDL_Rect rect;
+        rect.x = region.lo().x();
+        rect.y = region.lo().y();
+        rect.w = region.width();
+        rect.h = region.height();
 
-    pixel* dst;
-    int pitch;
+        // Lock the texture and get its address and pitch.
+        pixel* dst; int pitch;
+        SDL_LockTexture(texture_, &rect, (void**)&dst, &pitch);
+        pitch /= sizeof(pixel);
 
-    SDL_LockTexture(texture_, &rect, (void**)&dst, &pitch);
-    pitch /= sizeof(pixel);
+        // If we didn't have to composite down then we can blit directly from the
+        // primary pixbuffer instead of the composite pixbuffer.
+        const Pixbuffer& source = compositor_.composited() ? composite_ : primary_;
 
-    // If we didn't have to composite down then we can blit directly from the
-    // primary pixbuffer instead of the composite pixbuffer.
-    const Pixbuffer& source = compositor_.composited() ? composite_ : primary_;
+        // Blit the pixels to the texture.
+        const pixel* src = source.data(rect.x, rect.y);
+        for (int y=0; y < rect.h; ++y) {
+          memcpy(dst + y*pitch, src + y*source.stride(), rect.w*sizeof(pixel));
+        }
+        SDL_UnlockTexture(texture_);
+      }
+      primary_.clear_dirty_list();
+    });
 
-    // Blit the pixels to the texture.
-    const pixel* src = source.data(rect.x, rect.y);
-    for (int y=0; y < rect.h; ++y) {
-      memcpy(dst, src, rect.w*sizeof(pixel));
-      dst += pitch;
-      src += source.stride();
-    }
+    timeit("copy", "Copy texture to window", [&]() {
+      SDL_RenderCopy(renderer_, texture_, nullptr, nullptr);
+    });
 
-    SDL_UnlockTexture(texture_);
-  }
+    timeit("postdraw", "Call AfterDraw() hook", [&]() {
+      AfterDraw();
+    });
 
-  // SDL_UpdateTexture(texture_, nullptr, source.data(), source.stride_bytes());
-  SDL_RenderCopy(renderer_, texture_, nullptr, nullptr);
-
-  primary_.clear_dirty_list();
-  AfterDraw();
-  SDL_RenderPresent(renderer_);
+    timeit("present", "Present window to screen", [&]() {
+      SDL_RenderPresent(renderer_);
+    });
+  });
 }
 
 #ifdef EMSCRIPTEN
