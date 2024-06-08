@@ -150,7 +150,7 @@ protected:
       Affine3::Scale({1/Scale(), 1/Scale(), -1/Scale()})
       *Affine3::Permute(-1);
 
-    nadir_plane_ = Plane::FromNormal(Nadir());
+    nadir_plane_ = S2Plane::FromNormal(Nadir());
   }
 
  private:
@@ -337,7 +337,7 @@ protected:
 
   // Forward and reverse transformation matrices.
   Affine3 world_to_unit_, unit_to_world_;
-  Plane nadir_plane_;
+  S2Plane nadir_plane_;
 };
 
 // void Orthographic::GenerateParallels(absl::Nonnull<R2Shape*> out) const {

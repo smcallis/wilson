@@ -139,7 +139,7 @@ struct ClipResult {
 // respectively.  In either case we return ClipResult::Drop() indicating the
 // edge should be clipped away.
 inline ClipResult ClipToSmallCircle(
-  const Plane& plane, const S2Shape::Edge& edge) {
+  const S2Plane& plane, const S2Shape::Edge& edge) {
   // Test which side of the plane each vertex is on.
   int sign0 = plane.Sign(edge.v0);
   int sign1 = plane.Sign(edge.v1);
@@ -248,7 +248,7 @@ inline ClipResult ClipToSmallCircle(
 // orientation of the edge as v0.CrossProd(v1) is unchanged.
 //
 // Returns true if any of the edge survived clipping.
-inline bool ClipEdgeToSmallCircle(const Plane& plane, S2Shape::Edge& edge) {
+inline bool ClipEdgeToSmallCircle(const S2Plane& plane, S2Shape::Edge& edge) {
   ClipResult result = ClipToSmallCircle(plane, edge);
 
   switch (result.action) {

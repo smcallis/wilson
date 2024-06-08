@@ -149,7 +149,7 @@ struct Gnomonic final : Projection<Gnomonic> {
   void UpdateTransforms() override {
     // Set a new plane to clip geometry to.  The clip plane is offset by the sine
     // of the complementary angle.
-    clip_plane_ = Plane::FromSubcenter(sin_angle_ * Nadir());
+    clip_plane_ = S2Plane::FromSubcenter(sin_angle_ * Nadir());
   }
 
  private:
@@ -207,7 +207,7 @@ struct Gnomonic final : Projection<Gnomonic> {
 
     if (angle >= kSplitThreshold) {
       auto curve = //
-        Plane::FromSubcenter(clip_plane_.Subcenter()).Interpolate(v0, v1);
+        S2Plane::FromSubcenter(clip_plane_.Subcenter()).Interpolate(v0, v1);
 
       // Sample the curve at 1/3 and 2/3 and to break it into smaller pieces.
       const S2Point a = v0;
@@ -288,7 +288,7 @@ struct Gnomonic final : Projection<Gnomonic> {
   double cos_angle_;
   double cot_angle_;
 
-  Plane clip_plane_;
+  S2Plane clip_plane_;
 };
 
 inline void Gnomonic::Project(absl::Nonnull<R2VertexSink*> out,

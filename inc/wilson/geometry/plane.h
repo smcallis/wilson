@@ -37,13 +37,13 @@ namespace w {
 // The downside is that other features of the plane such as its normal vector
 // and offset from the origin are derived from the three defining points and
 // thus are inexact.
-struct Plane {
-  constexpr Plane() = default;
+struct S2Plane {
+  constexpr S2Plane() = default;
 
   // Constructs a plane from three points on the sphere.
   //
   // The points must not be co-linear.
-  constexpr Plane(const S2Point& u, const S2Point& v, const S2Point& w)
+  constexpr S2Plane(const S2Point& u, const S2Point& v, const S2Point& w)
       : u_(u), v_(v), w_(w) {
     DCHECK_NE(u, v);
     DCHECK_NE(u, w);
@@ -56,8 +56,8 @@ struct Plane {
   // Constructs a plane from two points and the origin.
   //
   // The resulting plane will contain the origin, i.e. plane.Sign({0,0,0}) == 0.
-  static constexpr Plane GreatPlane(const S2Point& u, const S2Point& v) {
-    return Plane(u, v, {0, 0, 0});
+  static constexpr S2Plane GreatPlane(const S2Point& u, const S2Point& v) {
+    return S2Plane(u, v, {0, 0, 0});
   }
 
   // Constructs a plane from a non-zero sub-center point (a scaled normal).
@@ -67,7 +67,7 @@ struct Plane {
   //
   // The basis points for the plane are computed as closely as possible, but
   // the final plane may not exactly contain the sub-center point.
-  static Plane FromSubcenter(const S2Point& center) {
+  static S2Plane FromSubcenter(const S2Point& center) {
     DCHECK_NE(center.Norm2(), 0);
 
     const S2Point u = center.Ortho();
@@ -75,21 +75,21 @@ struct Plane {
     const S2Point w = -((u + v)/2).Normalize();
 
     const double scale = std::sqrt(1 - std::min(1.0, center.Norm2()));
-    return Plane(
+    return S2Plane(
       (scale*u + center).Normalize(),
       (scale*v + center).Normalize(),
       (scale*w + center).Normalize());
   }
 
   // Constructs a plane through the origin from a normal vector.
-  static Plane FromNormal(const S2Point& normal) {
+  static S2Plane FromNormal(const S2Point& normal) {
     DCHECK(S2::IsUnitLength(normal));
 
     const S2Point u = normal.Ortho();
     const S2Point v = S2::RobustCrossProd(normal, u).Normalize();
     const S2Point w = -((u + v)/2).Normalize();
 
-    return Plane(u, v, w);
+    return S2Plane(u, v, w);
   }
 
   // Returns the points forming the plane.
