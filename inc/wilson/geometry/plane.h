@@ -68,10 +68,11 @@ struct S2Plane {
   // The basis points for the plane are computed as closely as possible, but
   // the final plane may not exactly contain the sub-center point.
   static S2Plane FromSubcenter(const S2Point& center) {
-    DCHECK_NE(center.Norm2(), 0);
+    DCHECK_GT(center.Norm2(), 0);
+    DCHECK_LT(center.Norm2(), 1 + 5*DBL_EPSILON);
 
     const S2Point u = center.Ortho();
-    const S2Point v = S2::RobustCrossProd(center, u).Normalize();
+    const S2Point v = S2::RobustCrossProd(center.Normalize(), u).Normalize();
     const S2Point w = -((u + v)/2).Normalize();
 
     const double scale = std::sqrt(1 - std::min(1.0, center.Norm2()));
@@ -109,7 +110,9 @@ struct S2Plane {
 
   // Returns an -approximate- normal vector for the plane.
   S2Point Normal() const {
-    return S2::RobustCrossProd(w_ - v_, u_ - v_).Normalize();
+    const S2Point e0 = (w_ - v_).Normalize();
+    const S2Point e1 = (u_ - v_).Normalize();
+    return S2::RobustCrossProd(e0, e1).Normalize();
   }
 
   // Returns an -approximate- distance to the origin for the plane.
@@ -150,7 +153,7 @@ struct S2Plane {
   // The point must lie within the unit sphere.
   int Sign(const S2Point& point) const {
     using Vector3_xf = s2pred::Vector3_xf;
-    DCHECK_LE(point.Norm2(), 1);
+    DCHECK_LE(point.Norm2() - 1, 5*DBL_EPSILON);
 
     // Shewchuck has a better error bound than this but it's a relative bound so
     // it requires us computing the magnitude of the result.  Instead we'll use

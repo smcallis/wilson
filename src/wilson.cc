@@ -158,14 +158,13 @@ public:
       ImGui::SetNextWindowSize(ImVec2(400, main_viewport->WorkSize.y), ImGuiCond_Always);
       ImGui::SetNextWindowViewport(main_viewport->ID);
 
-      // Disable rounded corners, padding and any border for the dock space.
+      // Disable rounded corners and any border for the sidebar.
       ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
       ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-      //ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
 
       ImGui::Begin("Sidebar", nullptr, window_flags);
       {
-        ImGui::PopStyleVar(3);
+        ImGui::PopStyleVar(2);
         ImGui::SeparatorText(absl::StrFormat("Status (%.2f)", fps()).c_str());
         ImGui::Indent();
 

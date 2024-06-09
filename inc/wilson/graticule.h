@@ -34,12 +34,16 @@ inline void S2Graticule(
   // Clip edges to the spherical cap bounding the viewport.  This will prevent
   // us from trying to subdivide parts of edges that aren't visible.
   S2Cap cap = proj.Viewcap();
-  S2Plane clip = S2Plane::FromSubcenter(cap.center()*(1-cap.height()));
-  bool clip_cap = cap.radius() < S1ChordAngle::Right();
+
+  const bool clip_cap = cap.height() < 1.0;
+  S2Plane clip_plane;
+  if (clip_cap) {
+    clip_plane = S2Plane::FromSubcenter(cap.center() * (1 - cap.height()));
+  }
 
   // Projects and subdivides an S2Shape edge and appends it to the path.
   const auto AppendEdgeToShape = [&](S2Shape::Edge edge) {
-    if (!clip_cap || ClipEdgeToSmallCircle(clip, edge)) {
+    if (!clip_cap || ClipEdgeToSmallCircle(clip_plane, edge)) {
       proj.Project(out, edge);
       out->Break();
     }
