@@ -14,6 +14,10 @@
 
 cmake_minimum_required(VERSION 3.22 FATAL_ERROR)
 
+# Prefer clang when present.
+find_program(CMAKE_C_COMPILER NAMES   $ENV{CC}  clang   gcc PATHS ENV PATH NO_DEFAULT_PATH)
+find_program(CMAKE_CXX_COMPILER NAMES $ENV{CXX} clang++ g++ PATHS ENV PATH NO_DEFAULT_PATH)
+
 project(Wilson LANGUAGES C CXX)
 
 if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
@@ -34,10 +38,6 @@ if (EMSCRIPTEN)
   # Workaround for linking error when LTO is enabled.
   add_link_options("-Wl,-u,htons" "-Wl,-u,htonl")
 endif()
-
-# Prefer clang when present.
-find_program(CMAKE_C_COMPILER NAMES   $ENV{CC}  clang   gcc PATHS ENV PATH NO_DEFAULT_PATH)
-find_program(CMAKE_CXX_COMPILER NAMES $ENV{CXX} clang++ g++ PATHS ENV PATH NO_DEFAULT_PATH)
 
 set(ABSL_PROPAGATE_CXX_STD on)
 set(CMAKE_CXX_EXTENSIONS on)
