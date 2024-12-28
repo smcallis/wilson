@@ -55,3 +55,19 @@ if (EMSCRIPTEN)
   # Allow a dynamic heap.
   add_link_option(wilson "-sALLOW_MEMORY_GROWTH")
 endif()
+
+# If compdb is installed run it to generate compile database for header files.
+find_program(COMPDB "compdb")
+if (COMPDB)
+  add_custom_command(
+    OUTPUT ${CMAKE_SOURCE_DIR}/compile_commands.json
+    COMMAND compdb -p ${CMAKE_BINARY_DIR} list > ${CMAKE_SOURCE_DIR}/compile_commands.json
+    DEPENDS ${CMAKE_BINARY_DIR}/compile_commands.json
+  )
+
+  add_custom_target(UpdateCompileCommands ALL
+    DEPENDS ${CMAKE_SOURCE_DIR}/compile_commands.json
+  )
+
+  add_dependencies(wilson UpdateCompileCommands)
+endif()
