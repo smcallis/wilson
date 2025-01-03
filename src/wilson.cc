@@ -104,14 +104,14 @@ class Wilson : public SDLApplication {
 public:
   enum : uint32_t { kNumVertices = 100 };
 
-  Wilson() : SDLApplication(), projection_(new Cubic()) {
+  Wilson() : SDLApplication(), projection_(new Orthographic()) {
     Resize();
     InitImGui();
     inset_.Resize(200, 200);
   }
 
   Wilson(int ww, int hh, absl::string_view title="")
-    : SDLApplication(ww, hh, title), projection_(new Cubic()) {
+    : SDLApplication(ww, hh, title), projection_(new Orthographic()) {
     Resize();
     InitImGui();
     inset_.Resize(200, 200);

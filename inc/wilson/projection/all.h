@@ -16,7 +16,6 @@
 
 #include "absl/flags/flag.h"
 
-#include "wilson/projection/cubic.h"
 #include "wilson/projection/equirectangular.h"
 #include "wilson/projection/gnomonic.h"
 #include "wilson/projection/orthographic.h"
@@ -54,7 +53,6 @@ struct ProjectionInfo {
 
 // Configure projections here.
 static const ProjectionInfo kProjectionList[] = {
-  ProjectionInfo::Create<Cubic>("Cubic", false),
   ProjectionInfo::Create<Equirectangular>("Equirectangular", false),
   ProjectionInfo::Create<Gnomonic>("Gnomonic", false),
   ProjectionInfo::Create<Orthographic>("Orthographic", false)
