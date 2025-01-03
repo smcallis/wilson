@@ -16,11 +16,11 @@
 
 #include "absl/flags/flag.h"
 
-#include "wilson/projection/projection.h"
-//#include "wilson/projection/cubic.h"
+#include "wilson/projection/cubic.h"
 #include "wilson/projection/equirectangular.h"
 #include "wilson/projection/gnomonic.h"
 #include "wilson/projection/orthographic.h"
+#include "wilson/projection/projection.h"
 
 ABSL_FLAG(bool, experimental_projections, false, "Enable experimental projections");
 
@@ -54,7 +54,7 @@ struct ProjectionInfo {
 
 // Configure projections here.
 static const ProjectionInfo kProjectionList[] = {
-//  ProjectionInfo::Create<Cubic>("Cubic", false),
+  ProjectionInfo::Create<Cubic>("Cubic", false),
   ProjectionInfo::Create<Equirectangular>("Equirectangular", false),
   ProjectionInfo::Create<Gnomonic>("Gnomonic", false),
   ProjectionInfo::Create<Orthographic>("Orthographic", false)

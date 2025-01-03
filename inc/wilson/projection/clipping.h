@@ -111,7 +111,8 @@ struct ClipResult {
 
   // Returns a ClipResult indicating the edge should be split.  Direction is
   // passed through opaquely to be interpreted in a projection specific way.
-  static constexpr ClipResult Split(const S2Point& point, int8_t direction) {
+  static constexpr ClipResult Split(  //
+    const S2Point& point = S2Point(), int8_t direction = 0) {
     ClipResult result(kSplit);
     result.point[0] = point;
     result.direction = direction;

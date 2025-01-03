@@ -24,7 +24,7 @@ target_link_libraries(
   resources
   imgui
   s2
-  Blend2D::Blend2D
+  blend2d
   z
 )
 
