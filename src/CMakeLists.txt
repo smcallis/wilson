@@ -18,14 +18,17 @@ add_executable(
   projection.cc
 )
 
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(OpenSSL REQUIRED openssl)
+
 target_link_libraries(
   wilson
   absl::flags_parse
   resources
   imgui
   s2
-  blend2d
-  z
+  blend2d::blend2d
+  ${OpenSSL_LIBRARIES}
 )
 
 # Slightly different names for the SDL dependency in emscripten.

@@ -33,7 +33,7 @@ namespace w {
 // the shape's edges and the edges in screen space, in pixels.
 //
 // Any existing path information is erased.
-static inline void Simplify(absl::Nonnull<R2Shape *> out,
+static inline void Simplify(R2Shape * absl_nonnull out,
     const R2Shape& shape, double max_sq_error=1) {
     out->Clear();
     for (int chain=0; chain < shape.nchains(); ++chain) {

@@ -61,7 +61,7 @@ struct Orthographic final : Projection<Orthographic> {
 
   // Populates a path representing the outline of the sphere on screen.  May
   // encompass the entire screen.
-  void AppendOutline(absl::Nonnull<R2VertexSink*> out) const override {
+  void AppendOutline(R2VertexSink* absl_nonnull out) const override {
     out->Break();
 
     // Find basis vectors for nadir plane that correspond to the axes of
@@ -75,7 +75,7 @@ struct Orthographic final : Projection<Orthographic> {
   }
 
   // Populates a path with a graticule with lines of latitude and longitude.
-  void MakeGraticule(absl::Nonnull<R2VertexSink*> out) const override {
+  void MakeGraticule(R2VertexSink* absl_nonnull out) const override {
     //out->Clear();
     //GenerateGraticule(out);
   }
@@ -89,7 +89,7 @@ struct Orthographic final : Projection<Orthographic> {
   // `nearest` is true then the closest point on the projection is returned,
   // otherwise false is returned if the point is out of bounds.
   bool UnitToWorld(  //
-    absl::Nonnull<S2Point*> out, const R2Point& proj, bool nearest) const override {
+    S2Point* absl_nonnull out, const R2Point& proj, bool nearest) const override {
     S2Point pnt = unit_to_world_ * S2Point(proj.x(), proj.y(), 0);
 
     // Unprojecting a point gives us Y and Z coordinates in 3 space.  Since X is
@@ -116,7 +116,7 @@ struct Orthographic final : Projection<Orthographic> {
   }
 
   // Projects a point into screen space.  Returns true if it's visible.
-  bool Project(absl::Nonnull<R2Point*> out, const S2Point& point) const override {
+  bool Project(R2Point* absl_nonnull out, const S2Point& point) const override {
     // Orthographic projections can see half the sphere.  So check that we're on
     // the positive side of the plane defined by the nadir.
     if (s2pred::SignDotProd(Nadir(), point) > 0) {
@@ -127,9 +127,9 @@ struct Orthographic final : Projection<Orthographic> {
   }
 
   // Projection functions.
-  void Project(absl::Nonnull<R2VertexSink*> out, const S2Shape::Edge&) const override;
-  void Project(absl::Nonnull<R2VertexSink*> out, const S2Shape&) const override;
-  void Project(absl::Nonnull<R2VertexSink*> out, absl::Nonnull<ChainStitcher*>, const S2Shape&, ContainsPointFn contains) const override;
+  void Project(R2VertexSink* absl_nonnull out, const S2Shape::Edge&) const override;
+  void Project(R2VertexSink* absl_nonnull out, const S2Shape&) const override;
+  void Project(R2VertexSink* absl_nonnull out, ChainStitcher* absl_nonnull, const S2Shape&, ContainsPointFn contains) const override;
 
 protected:
   // Updates the transformation matrices.
@@ -184,7 +184,7 @@ protected:
   // Expects that the edge has been properly clipped so that projecting will not
   // wrap in screen space, which will lead to unpredictable results.
   void Subdivide(  //
-    R2VertexSink* out, const S2Shape::Edge& edge) const {
+    R2VertexSink* absl_nonnull out, const S2Shape::Edge& edge) const {
 
     const R2Point p0 = Project(edge.v0);
     const R2Point p1 = Project(edge.v1);
@@ -200,7 +200,7 @@ protected:
   }
 
   // Helper method that recursively subdivides an edge.
-  void Subdivide(absl::Nonnull<R2VertexSink*> out,
+  void Subdivide(R2VertexSink* absl_nonnull out,
     const S2Shape::Edge& s2edge, const R2Shape::Edge& r2edge) const {
 
     // Compute a point halfway along the edge.
@@ -221,7 +221,7 @@ protected:
   }
 
   // Regenerate the graticule path with the current transform.
-  void GenerateGraticule(absl::Nonnull<R2Shape*> out) const {
+  void GenerateGraticule(R2Shape* absl_nonnull out) const {
     // // Draw lines of longitude.
     // for (int i=0; i < 36; ++i) {
     //   double lon = -M_PI + (M_PI/180)*10*i;
@@ -238,7 +238,7 @@ protected:
   }
 
   // // Generate meridian curves.
-  // void GenerateMeridian(absl::Nonnull<R2Shape*> out, double lon, double maxlat) const {
+  // void GenerateMeridian(R2Shape* absl_nonnull out, double lon, double maxlat) const {
   //   double clon = std::cos(lon);
   //   double clat = std::cos(maxlat);
   //   double slon = std::sin(lon);
@@ -280,7 +280,7 @@ protected:
   //   return BLPoint(pnt.x(), pnt.y());
   // }
 
-  // void GenerateParallels(absl::Nonnull<R2Shape*> out) const;
+  // void GenerateParallels(R2Shape* absl_nonnull out) const;
 
 
   // Processes an edge and returns a ClipResult to use to process it.
@@ -340,7 +340,7 @@ protected:
   S2Plane nadir_plane_;
 };
 
-// void Orthographic::GenerateParallels(absl::Nonnull<R2Shape*> out) const {
+// void Orthographic::GenerateParallels(R2Shape* absl_nonnull out) const {
 //   // Generate lines of latitude.
 //   //
 //   // This is more complex because we have to find the limb points for each line
@@ -486,7 +486,7 @@ protected:
 //   }
 // }
 
-inline void Orthographic::Project(absl::Nonnull<R2VertexSink*> out,
+inline void Orthographic::Project(R2VertexSink* absl_nonnull out,
   const S2Shape::Edge& edge) const {
 
   const ClipResult result = ClipEdge(edge);
@@ -522,7 +522,7 @@ inline void Orthographic::Project(absl::Nonnull<R2VertexSink*> out,
 
 
 inline void Orthographic::Project(  //
-  absl::Nonnull<R2VertexSink*> out, const S2Shape& shape) const {
+  R2VertexSink* absl_nonnull out, const S2Shape& shape) const {
   DCHECK_LT(shape.dimension(), 2);
 
   // Points don't need anything fancy, just project them.
@@ -580,8 +580,8 @@ inline void Orthographic::Project(  //
   }
 }
 
-inline void Orthographic::Project(absl::Nonnull<R2VertexSink*> out,
-  absl::Nonnull<ChainStitcher*> stitcher, const S2Shape& shape, ContainsPointFn contains) const {
+inline void Orthographic::Project(R2VertexSink* absl_nonnull out,
+  ChainStitcher* absl_nonnull stitcher, const S2Shape& shape, ContainsPointFn contains) const {
 
   // Adds a chain of vertices to the output.
   const auto AddChain = [&](absl::Span<const R2Point> vertices) {

@@ -85,7 +85,7 @@ struct _Interval {
 
   // Returns true if an interval is contained.
   bool contains(_Interval b) const {
-    return contains(b.v0) && contains(b.v1);
+    return contains(b.v0_) && contains(b.v1_);
   }
 
   // Returns true if another intervals intersects this one.

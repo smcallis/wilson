@@ -301,12 +301,12 @@ public:
   //
   // Does not clear the sink before appending.  The resulting outline is
   // suitable for filling with a background color for the projection as a whole.
-  virtual void AppendOutline(absl::Nonnull<R2VertexSink*> out) const = 0;
+  virtual void AppendOutline(R2VertexSink* absl_nonnull out) const = 0;
 
   // Appends a graticule showing lines of latitude and longitude to a sink.
   //
   // Does not clear the sink before appending.
-  virtual void MakeGraticule(absl::Nonnull<R2VertexSink*> out) const = 0;
+  virtual void MakeGraticule(R2VertexSink* absl_nonnull out) const = 0;
 
   // Returns an S2Cap covering the viewport.  This is a coarse covering but
   // generally much faster than getting a full viewport covering via Viewport().
@@ -344,7 +344,7 @@ public:
   // Otherwise, if 'nearest' is true, then the point is project onto the closest
   // visible point on the unit sphere.
   virtual bool UnitToWorld( //
-    absl::Nonnull<S2Point*> out, const R2Point& point, bool nearest) const = 0;
+    S2Point* absl_nonnull out, const R2Point& point, bool nearest) const = 0;
 
 
   // Projects a point from world space to screen space unconditionally.
@@ -353,7 +353,7 @@ public:
   // Projects a point from world space to screen space.
   //
   // Returns true if the point is visible on screen, false otherwise.
-  virtual bool Project(absl::Nonnull<R2Point*> out, const S2Point&) const = 0;
+  virtual bool Project(R2Point* absl_nonnull out, const S2Point&) const = 0;
 
 
   // Transforms a point from screen space back to world space, if possible.
@@ -365,7 +365,7 @@ public:
   //
   // Otherwise, returns false.
   virtual bool Unproject(  //
-    absl::Nonnull<S2Point *> out, const R2Point& point, bool nearest) const = 0;
+    S2Point * absl_nonnull out, const R2Point& point, bool nearest) const = 0;
 
 
   // Projects an edge from world space to screen space.  The edge is subdivided,
@@ -373,7 +373,7 @@ public:
   //
   // Does not clear the sink before appending.  May add breaks to the ChainSink.
   virtual void Project( //
-    absl::Nonnull<R2VertexSink*> out, const S2Shape::Edge& edge) const = 0;
+    R2VertexSink* absl_nonnull out, const S2Shape::Edge& edge) const = 0;
 
 
   // Projects a shape of 0 or 1 dimensions into screen space.  Any edges are
@@ -382,7 +382,7 @@ public:
   //
   // Does not clear the sink before appending.  May add breaks to the ChainSink.
   virtual void Project(  //
-    absl::Nonnull<R2VertexSink*> out, const S2Shape& shape) const = 0;
+    R2VertexSink* absl_nonnull out, const S2Shape& shape) const = 0;
 
 
   // Projects a polygon into screen space.  0 and 1 dimensional shapes should
@@ -399,7 +399,7 @@ public:
   //
   // Does not clear the sink before appending.  May add breaks to the ChainSink.
   virtual void Project(  //
-      absl::Nonnull<R2VertexSink*> out, absl::Nonnull<ChainStitcher*> stitcher,
+      R2VertexSink* absl_nonnull out, ChainStitcher* absl_nonnull stitcher,
       const S2Shape&, ContainsPointFn contains) const = 0;
 
 
@@ -412,7 +412,7 @@ public:
   //
   // Does not clear the sink before appending.  May add breaks to the ChainSink.
   virtual void Project(  //
-      absl::Nonnull<R2VertexSink*> out, absl::Nonnull<ChainStitcher*> stitcher,
+      R2VertexSink* absl_nonnull out, ChainStitcher* absl_nonnull stitcher,
       const S2Cap& cap) const = 0;
 
   // --------------------------------------------------------------------------
@@ -420,11 +420,11 @@ public:
   // We can't use default parameters with virtual methods.
   // --------------------------------------------------------------------------
 
-  bool UnitToWorld(absl::Nonnull<S2Point*> out, const R2Point& point) const {
+  bool UnitToWorld(S2Point* absl_nonnull out, const R2Point& point) const {
     return UnitToWorld(out, point, false);
   }
 
-  bool Unproject(absl::Nonnull<S2Point*> out, const R2Point& point) const {
+  bool Unproject(S2Point* absl_nonnull out, const R2Point& point) const {
     return Unproject(out, point, false);
   }
 
@@ -520,11 +520,11 @@ public:
 
   virtual S2Cap Viewcap() const override;
 
-  virtual void Project(absl::Nonnull<R2VertexSink*> out,
-    absl::Nonnull<ChainStitcher*> stitcher, const S2Cap& cap) const override;
+  virtual void Project(R2VertexSink* absl_nonnull out,
+    ChainStitcher* absl_nonnull stitcher, const S2Cap& cap) const override;
 
   virtual bool Unproject(
-    absl::Nonnull<S2Point*> out, const R2Point& point, bool nearest) const override;
+    S2Point* absl_nonnull out, const R2Point& point, bool nearest) const override;
 
 private:
   // Cast back to the Derived class.
@@ -611,7 +611,7 @@ inline void Projection<Derived>::Resize(int width, int height) {
 
 template <typename Derived>
 bool Projection<Derived>::Unproject(
-  absl::Nonnull<S2Point*> out, const R2Point& pnt, bool nearest) const {
+  S2Point* absl_nonnull out, const R2Point& pnt, bool nearest) const {
   if (projection().UnitToWorld(out, projection().ScreenToUnit(pnt), nearest)) {
     *out = projection().Unrotate(*out);
     return true;
@@ -620,8 +620,8 @@ bool Projection<Derived>::Unproject(
 }
 
 template <typename Derived>
-void Projection<Derived>::Project(absl::Nonnull<R2VertexSink*> out,
-  absl::Nonnull<ChainStitcher*> stitcher, const S2Cap& cap) const {
+void Projection<Derived>::Project(R2VertexSink* absl_nonnull out,
+  ChainStitcher* absl_nonnull stitcher, const S2Cap& cap) const {
 
   // Find the center of the cap and vectors defining the plane it lies in.
   const double base = std::sqrt(1 - std::pow(1 - cap.height(), 2));

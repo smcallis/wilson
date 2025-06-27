@@ -30,7 +30,7 @@ namespace w {
 //
 // Any existing path information is cleared.
 inline void S2Graticule(
-  absl::Nonnull<R2Shape *> out, const IProjection &proj, int level) {
+  R2Shape * absl_nonnull out, const IProjection &proj, int level) {
   // Clip edges to the spherical cap bounding the viewport.  This will prevent
   // us from trying to subdivide parts of edges that aren't visible.
   S2Cap cap = proj.Viewcap();

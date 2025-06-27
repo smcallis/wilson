@@ -71,7 +71,7 @@ using S2VertexSink = VertexSink<S2Point>;
 // Adds a new chain to the sink that's a closed circle.  The circle is segmented
 // into lines such that the maximum distance from any given line segment to the
 // circle is less than `max_error`.
-inline void AppendCircle(absl::Nonnull<R2VertexSink*> out,  //
+inline void AppendCircle(R2VertexSink* absl_nonnull out,  //
   const R2Point& center, double radius, double max_error) {
 
   // The sagitta of a chord subtending an angle θ is

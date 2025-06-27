@@ -91,7 +91,7 @@ struct Equirectangular final : Projection<Equirectangular> {
 
   // Populates a path representing the outline of the sphere on screen.  May
   // encompass the entire screen.
-  void AppendOutline(absl::Nonnull<R2VertexSink*> out) const override {
+  void AppendOutline(R2VertexSink* absl_nonnull out) const override {
     out->Break();
     out->Append(R2Point(outline_.lo().x(), outline_.hi().y()));
     out->Append(R2Point(outline_.hi().x(), outline_.hi().y()));
@@ -101,7 +101,7 @@ struct Equirectangular final : Projection<Equirectangular> {
   }
 
   // Populates a path with a graticule with lines of latitude and longitude.
-  void MakeGraticule(absl::Nonnull<R2VertexSink*> out) const override {
+  void MakeGraticule(R2VertexSink* absl_nonnull out) const override {
     // generate_graticule(path);
   }
 
@@ -117,7 +117,7 @@ struct Equirectangular final : Projection<Equirectangular> {
   // `nearest` is true then the closest point on the projection is returned,
   // otherwise false is returned if the point is out of bounds.
   bool UnitToWorld(  //
-    absl::Nonnull<S2Point*> out, const R2Point& proj, bool nearest) const override {
+    S2Point* absl_nonnull out, const R2Point& proj, bool nearest) const override {
     double lat = proj.y()/Scale();
     double lon = proj.x()/Scale();
 
@@ -146,15 +146,15 @@ struct Equirectangular final : Projection<Equirectangular> {
   }
 
   // Projects a point into screen space.  Returns true if it's visible.
-  bool Project(absl::Nonnull<R2Point*> out, const S2Point& point) const override {
+  bool Project(R2Point* absl_nonnull out, const S2Point& point) const override {
     *out = Project(point);
     return true;  // All points are visible.
   }
 
   // Projection functions.
-  void Project(absl::Nonnull<R2VertexSink*> out, const S2Shape::Edge&) const override;
-  void Project(absl::Nonnull<R2VertexSink*> out, const S2Shape&) const override;
-  void Project(absl::Nonnull<R2VertexSink*> out, absl::Nonnull<ChainStitcher*>, const S2Shape&, ContainsPointFn contains) const override;
+  void Project(R2VertexSink* absl_nonnull out, const S2Shape::Edge&) const override;
+  void Project(R2VertexSink* absl_nonnull out, const S2Shape&) const override;
+  void Project(R2VertexSink* absl_nonnull out, ChainStitcher* absl_nonnull, const S2Shape&, ContainsPointFn contains) const override;
 
 private:
   region2 outline_;
@@ -235,7 +235,7 @@ private:
   // Expects that the edge has been properly clipped so that projecting will not
   // wrap in screen space, which will lead to unpredictable results.
   void Subdivide(  //
-    R2VertexSink* out, const S2Shape::Edge& edge, BoundaryPair bs = {}) const {
+    R2VertexSink* absl_nonnull out, const S2Shape::Edge& edge, BoundaryPair bs = {}) const {
 
     // The real function, defined here because we may have to call it twice.
     const auto Run = [&](const S2Shape::Edge& edge, BoundaryPair bs) {
@@ -292,7 +292,7 @@ private:
   }
 
   // Helper method that recursively subdivides an edge.
-  void Subdivide(absl::Nonnull<R2VertexSink*> out,
+  void Subdivide(R2VertexSink* absl_nonnull out,
     const S2Shape::Edge& s2edge, const R2Shape::Edge& r2edge) const {
 
     // Compute a point halfway along the edge.
@@ -451,7 +451,7 @@ private:
 // Implementation
 ////////////////////////////////////////////////////////////////////////////////
 
-inline void Equirectangular::Project(absl::Nonnull<R2VertexSink*> out,
+inline void Equirectangular::Project(R2VertexSink* absl_nonnull out,
   const S2Shape::Edge& edge) const {
 
   const ClipResult result = ClipEdge(edge);
@@ -498,7 +498,7 @@ inline void Equirectangular::Project(absl::Nonnull<R2VertexSink*> out,
 }
 
 inline void Equirectangular::Project(  //
-  absl::Nonnull<R2VertexSink*> out, const S2Shape& shape) const {
+  R2VertexSink* absl_nonnull out, const S2Shape& shape) const {
   DCHECK_LT(shape.dimension(), 2);
 
   // Points don't need anything fancy, just project them.
@@ -564,8 +564,8 @@ inline void Equirectangular::Project(  //
   }
 }
 
-inline void Equirectangular::Project(absl::Nonnull<R2VertexSink*> out,
-  absl::Nonnull<ChainStitcher*> stitcher,
+inline void Equirectangular::Project(R2VertexSink* absl_nonnull out,
+  ChainStitcher* absl_nonnull stitcher,
   const S2Shape& shape, ContainsPointFn contains) const {
 
   // Adds a chain of vertices to the output.

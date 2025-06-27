@@ -38,6 +38,9 @@
 namespace w {
 
 struct Gnomonic final : Projection<Gnomonic> {
+  // Import this explicitly so we can see it with our other Project() overloads.
+  using Projection::Project;
+
   // Gnomonic projections are infinite in extent since they're a tangent
   // projection.  We have to limit the portion of the sphere that's visible.  By
   // default we'll show a 120 degree segment of the sphere.
@@ -89,7 +92,7 @@ struct Gnomonic final : Projection<Gnomonic> {
   }
 
   // Appends an outline for the projection to the given output.
-  void AppendOutline(absl::Nonnull<R2VertexSink*> out) const override {
+  void AppendOutline(R2VertexSink* absl_nonnull out) const override {
     // The gnomonic projection is always a unit circle in unit space, we can
     // just multiply the radius by the scale to get the correct size.
     R2Point origin = UnitToScreen({0,0});
@@ -99,7 +102,7 @@ struct Gnomonic final : Projection<Gnomonic> {
   }
 
   // Populates a path with a graticule with lines of latitude and longitude.
-  void MakeGraticule(absl::Nonnull<R2VertexSink*> out) const override {
+  void MakeGraticule(R2VertexSink* absl_nonnull out) const override {
     out->Clear();
     // generate_graticule(path);
   }
@@ -108,7 +111,7 @@ struct Gnomonic final : Projection<Gnomonic> {
     return (Scale()*sin_angle_/cos_angle_)*R2Point(p.y()/p.x(), -p.z()/p.x());
   }
 
-  bool UnitToWorld(absl::Nonnull<S2Point*> out, const R2Point& proj, bool nearest) const override {
+  bool UnitToWorld(S2Point* absl_nonnull out, const R2Point& proj, bool nearest) const override {
     R2Point point = (cot_angle_/Scale())*proj;
     if (point.Norm2() <= cot_angle_*cot_angle_) {
       *out = S2Point(1, point.x(), -point.y()).Normalize();
@@ -132,7 +135,7 @@ struct Gnomonic final : Projection<Gnomonic> {
   }
 
   // Projects a point into screen space.  Returns true if it's visible.
-  bool Project(absl::Nonnull<R2Point*> out, const S2Point& point) const override {
+  bool Project(R2Point* absl_nonnull out, const S2Point& point) const override {
     if (clip_plane_.Sign(point) > 0) {
       *out = Project(point);
       return true;
@@ -141,9 +144,9 @@ struct Gnomonic final : Projection<Gnomonic> {
   }
 
   // Projection functions.
-  void Project(absl::Nonnull<R2VertexSink*> out, const S2Shape::Edge&) const override;
-  void Project(absl::Nonnull<R2VertexSink*> out, const S2Shape&) const override;
-  void Project(absl::Nonnull<R2VertexSink*> out, absl::Nonnull<ChainStitcher*>, const S2Shape&, ContainsPointFn contains) const override;
+  void Project(R2VertexSink* absl_nonnull out, const S2Shape::Edge&) const override;
+  void Project(R2VertexSink* absl_nonnull out, const S2Shape&) const override;
+  void Project(R2VertexSink* absl_nonnull out, ChainStitcher* absl_nonnull, const S2Shape&, ContainsPointFn contains) const override;
 
  protected:
   void UpdateTransforms() override {
@@ -184,7 +187,7 @@ struct Gnomonic final : Projection<Gnomonic> {
   //
   // Expects that the edge has been properly clipped so that projecting will not
   // wrap in screen space, which will lead to unpredictable results.
-  void Subdivide(absl::Nonnull<R2VertexSink*> out, const S2Shape::Edge& edge) const {
+  void Subdivide(R2VertexSink* absl_nonnull out, const S2Shape::Edge& edge) const {
     if (out->ChainEmpty()) {
       out->Append(Project(edge.v0));
     }
@@ -199,7 +202,7 @@ struct Gnomonic final : Projection<Gnomonic> {
   // from v0 to v1 counter-clockwise around the nadir().  When the vertices are
   // the same, the angle between them will be zero.  This can be overridden by
   // passing full = true to force a full 360 degree arc.
-  void Stitch(R2VertexSink* out, const S2Point& v0, const S2Point& v1, bool full = false) const {
+  void Stitch(R2VertexSink* absl_nonnull out, const S2Point& v0, const S2Point& v1, bool full = false) const {
     // Split at slightly less than 180 degrees to avoid numerical issues.
     constexpr double kSplitThreshold = 0.95 * M_PI;
 
@@ -225,7 +228,7 @@ struct Gnomonic final : Projection<Gnomonic> {
 
   // Does the real work of subdividing and projecting an arc from v0 to v1.
   void StitchInternal(
-    R2VertexSink* out, const S2Point& v0, const S2Point& v1) const {
+    R2VertexSink* absl_nonnull out, const S2Point& v0, const S2Point& v1) const {
     // Projections are promised to be clipped to their outline, so we can
     // overdraw a bit past the actual projection boundary which lets us
     // subdivide the curve much more coarsely without any visible artifacts.
@@ -291,7 +294,7 @@ struct Gnomonic final : Projection<Gnomonic> {
   S2Plane clip_plane_;
 };
 
-inline void Gnomonic::Project(absl::Nonnull<R2VertexSink*> out,
+inline void Gnomonic::Project(R2VertexSink* absl_nonnull out,
   const S2Shape::Edge& edge) const {
 
   S2Shape::Edge copy = edge;
@@ -301,7 +304,7 @@ inline void Gnomonic::Project(absl::Nonnull<R2VertexSink*> out,
 }
 
 inline void Gnomonic::Project(  //
-  absl::Nonnull<R2VertexSink*> out, const S2Shape& shape) const {
+  R2VertexSink* absl_nonnull out, const S2Shape& shape) const {
   DCHECK_LT(shape.dimension(), 2);
 
   // Points don't need anything fancy, just project them.
@@ -359,8 +362,8 @@ inline void Gnomonic::Project(  //
   }
 }
 
-inline void Gnomonic::Project(absl::Nonnull<R2VertexSink*> out,
-  absl::Nonnull<ChainStitcher*> stitcher, const S2Shape& shape, ContainsPointFn contains) const {
+inline void Gnomonic::Project(R2VertexSink* absl_nonnull out,
+  ChainStitcher* absl_nonnull stitcher, const S2Shape& shape, ContainsPointFn contains) const {
 
   // Adds a chain of vertices to the output.
   const auto AddChain = [&](absl::Span<const R2Point> vertices) {
