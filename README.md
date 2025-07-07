@@ -5,7 +5,7 @@ two excellent tools: [S2](https://github.com/google/s2geometry), a library from
 Google operating on spherical geometry, and [Blend2D](https://blend2d.com/), a
 JIT-ed 2D vector graphics engine.
 
-See a live example here (press 'm' for a menu):
+See a live example [here](https://smcallis.github.io/wilson/) (press 'm' for a menu):
 
 [![Wilson Screenshot](doc/wilson-screenshot-1.png)](https://smcallis.github.io/wilson/)
 
