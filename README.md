@@ -7,7 +7,7 @@ JIT-ed 2D vector graphics engine.
 
 See a live example here (press 'm' for a menu):
 
-[![Wilson Screenshot](images/wilson-screenshot-1.png)](https://smcallis.github.io/wilson/)
+[![Wilson Screenshot](doc/wilson-screenshot-1.png)](https://smcallis.github.io/wilson/)
 
 
 # Compiling
