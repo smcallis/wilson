@@ -8,8 +8,8 @@ set(BUILD_SHARED_LIBS OFF)
 CPMAddPackage(
   NAME abseil
   GITHUB_REPOSITORY abseil/abseil-cpp
-  GIT_TAG master
-  OPTIONS "ABSL_PROPAGATE_CXX_STD ON" "ABSL_ENABLE_INSTALL ON"
+  GIT_TAG 20250512.1
+  OPTIONS "ABSL_PROPAGATE_CXX_STD ON" "ABSL_ENABLE_INSTALL ON" "BUILD_TESTING OFF"
 )
 
 # Required for Blend2d
@@ -43,6 +43,14 @@ CPMAddPackage(
   VERSION v0.11.1
   GITHUB_REPOSITORY google/s2geometry
   OPTIONS "WITH_GFLAGS off" "WITH_GLOG off" "BUILD_TESTS off"
+)
+
+CPMAddPackage(
+  NAME googletest
+  GITHUB_REPOSITORY google/googletest
+  GIT_TAG v1.14.0
+  VERSION v1.14.0
+  OPTIONS "INSTALL_GTEST OFF" "gtest_force_shared_crt"
 )
 
 # Only compile SDL2 if we're not building for Emscripten.  If we are then we
@@ -85,3 +93,4 @@ if (SDL2_ADDED)
 endif()
 
 add_subdirectory(imgui)
+add_subdirectory(fuzztest)

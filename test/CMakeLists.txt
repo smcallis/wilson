@@ -18,5 +18,15 @@ enable_testing()
 add_executable(wilson_test wilson_test.cc)
 target_link_libraries(wilson_test s2)
 
+add_executable(rasterize_test rasterize_test.cc)
+target_link_libraries(rasterize_test PRIVATE gmock gtest s2)
+link_fuzztest(rasterize_test)
+gtest_discover_tests(rasterize_test rasterize_test)
+
+add_executable(fixed_test fixed_test.cc)
+target_link_libraries(fixed_test PRIVATE gmock gtest s2)
+link_fuzztest(fixed_test)
+gtest_discover_tests(fixed_test fixed_test)
+
 include(doctest)
 doctest_discover_tests(wilson_test)

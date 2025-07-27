@@ -72,6 +72,9 @@ include_directories(inc)
 include_directories(third_party)
 include_directories("${CMAKE_BINARY_DIR}/inc/")
 
+# Configure any compiler flags needed for fuzzing.
+fuzztest_setup_fuzzing_flags()
+
 # Typical installation location for MacPorts.
 if (MACOSX)
   include_directories(/opt/local/include)
