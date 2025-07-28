@@ -76,6 +76,7 @@ FetchContent_MakeAvailable(re2)
 # set(GTEST_HAS_ABSL ON)
 # FetchContent_MakeAvailable(googletest)
 
+set(ANTLR_BUILD_CPP_TESTS OFF)
 FetchContent_MakeAvailable(antlr_cpp)
 
 # if (FUZZTEST_BUILD_TESTING)
