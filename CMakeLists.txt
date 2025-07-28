@@ -31,8 +31,8 @@ set(CMAKE_FIND_LIBRARY_SUFFIXES .a ${CMAKE_FIND_LIBRARY_SUFFIXES})
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/")
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/third_party/cmake")
 
-# Enable LTO for emscripten.
 if (EMSCRIPTEN)
+  # Enable LTO
   set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
 
   # Workaround for linking error when LTO is enabled.

@@ -17,8 +17,8 @@
 #include <cmath>
 #include <type_traits>
 
-#include "gtest/gtest.h"
 #include "fuzztest/fuzztest.h"
+#include "gtest/gtest.h"
 
 namespace w {
 namespace {

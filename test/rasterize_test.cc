@@ -16,16 +16,16 @@
 
 #include <cmath>
 #include <cstdint>
-#include <utility>
 #include <vector>
 
-//#include "testing/base/public/benchmark.h"
 #include "absl/log/check.h"
 #include "absl/types/span.h"
+#include "benchmark/benchmark.h"
 #include "fuzztest/fuzztest.h"
 #include "gtest/gtest.h"
 #include "gmock/gmock.h"
 #include "s2/r2.h"
+#include "wilson/dat/lion.h"
 #include "wilson/util/fixed.h"
 
 namespace w {
@@ -478,103 +478,103 @@ void CoverageCloses(std::vector<R2Point> offsets) {
 
   int count = 0;
   rasterizer.Sweep([&](auto) { ++count; });
-  //benchmark::DoNotOptimize(count);  // Make sure Sweep is not optimized out.
+  benchmark::DoNotOptimize(count);  // Make sure Sweep is not optimized out.
 }
 FUZZ_TEST(RasterizerFuzzing, CoverageCloses)
     .WithDomains(fuzztest::VectorOf(R2PointDomain(1, +1024, 1, +1024)));
 
-// // Benchmark with double precision points.
-// void BM_RasterizeLionDouble(benchmark::State& state) {
-//   // Collect the lion loops once and hold onto them.
-//   std::vector<std::vector<R2Point>> loops;
-//   VisitLionLoops([&](auto, absl::Span<const R2Loop> points) {
-//     for (const auto& loop : points) {
-//       loops.emplace_back(loop);
-//     }
-//   });
+// Benchmark with double precision points.
+void BM_RasterizeLionDouble(benchmark::State& state) {
+  // Collect the lion loops once and hold onto them.
+  std::vector<std::vector<R2Point>> loops;
+  VisitLionLoops([&](auto, absl::Span<const R2Loop> points) {
+    for (const auto& loop : points) {
+      loops.emplace_back(loop);
+    }
+  });
 
-//   // Count the total boundary pixels to process.
-//   int64_t boundary_pixels = 0;
-//   for (const std::vector<R2Point>& loop : loops) {
-//     for (int i = 0, size = loop.size(); i < size - 1; ++i) {
-//       boundary_pixels += std::round((loop[i+1] - loop[i]).Norm());
-//     }
-//   }
-//   CHECK_NE(boundary_pixels, 0);
+  // Count the total boundary pixels to process.
+  int64_t boundary_pixels = 0;
+  for (const std::vector<R2Point>& loop : loops) {
+    for (int i = 0, size = loop.size(); i < size - 1; ++i) {
+      boundary_pixels += std::round((loop[i+1] - loop[i]).Norm());
+    }
+  }
+  CHECK_NE(boundary_pixels, 0);
 
-//   Rasterizer rasterizer;
-//   for (auto _ : state) {
-//     for (const std::vector<R2Point>& loop : loops) {
-//       rasterizer.Reset();
-//       for (int i = 0, size = loop.size(); i < size - 1; ++i) {
-//         rasterizer.AddEdge(loop[i], loop[i+1]);
-//       }
-//     }
+  Rasterizer rasterizer;
+  for (auto _ : state) {
+    for (const std::vector<R2Point>& loop : loops) {
+      rasterizer.Reset();
+      for (int i = 0, size = loop.size(); i < size - 1; ++i) {
+        rasterizer.AddEdge(loop[i], loop[i+1]);
+      }
+    }
 
-//     int count = 0;
-//     rasterizer.Sweep([&](auto) {
-//       ++count;
-//     });
+    int count = 0;
+    rasterizer.Sweep([&](auto) {
+      ++count;
+    });
 
-//     benchmark::DoNotOptimize(count);
-//   }
-//   state.SetItemsProcessed(state.iterations() * boundary_pixels);
-// }
-// BENCHMARK(BM_RasterizeLionDouble);
+    benchmark::DoNotOptimize(count);
+  }
+  state.SetItemsProcessed(state.iterations() * boundary_pixels);
+}
+BENCHMARK(BM_RasterizeLionDouble);
 
-// // Benchmark with fixed precision points.
-// void BM_RasterizeLionFixed(benchmark::State& state) {
-//   using Fixed = Rasterizer::fix32p8;
+// Benchmark with fixed precision points.
+void BM_RasterizeLionFixed(benchmark::State& state) {
+  using Fixed = Rasterizer::fix32p8;
 
-//   struct F2Point {
-//     F2Point() = default;
-//     F2Point(Fixed x, Fixed y) : x(x), y(y) {}
-//     Fixed x, y;
-//   };
+  struct F2Point {
+    F2Point() = default;
+    F2Point(Fixed x, Fixed y) : x(x), y(y) {}
+    Fixed x, y;
+  };
 
-//   // Collect the lion loops once and hold onto them.
-//   std::vector<std::vector<F2Point>> loops;
-//   VisitLionLoops([&](auto, absl::Span<const R2Loop> r2loops) {
-//     std::vector<F2Point> loop;
-//     for (const auto& r2loop : r2loops) {
-//       for (const R2Point& point : r2loop) {
-//         loop.emplace_back(  //
-//           Fixed::FromDouble(point.x()), Fixed::FromDouble(point.y()));
-//       }
-//       loops.emplace_back(std::move(loop));
-//     }
-//   });
+  // Collect the lion loops once and hold onto them.
+  std::vector<std::vector<F2Point>> loops;
+  VisitLionLoops([&](auto, absl::Span<const R2Loop> r2loops) {
+    std::vector<F2Point> loop;
+    for (const auto& r2loop : r2loops) {
+      for (const R2Point& point : r2loop) {
+        loop.emplace_back(  //
+          Fixed::FromDouble(point.x()), Fixed::FromDouble(point.y()));
+      }
+      loops.emplace_back(std::move(loop));
+    }
+  });
 
-//   // Count the total boundary pixels to process.
-//   int64_t boundary_pixels = 0;
-//   for (const std::vector<F2Point>& loop : loops) {
-//     for (int i = 0, size = loop.size(); i < size - 1; ++i) {
-//       const double dx = ToDouble(loop[i+1].x - loop[i].x);
-//       const double dy = ToDouble(loop[i+1].y - loop[i].y);
-//       boundary_pixels += std::round(std::sqrt(dx*dx + dy*dy));
-//     }
-//   }
-//   CHECK_NE(boundary_pixels, 0);
+  // Count the total boundary pixels to process.
+  int64_t boundary_pixels = 0;
+  for (const std::vector<F2Point>& loop : loops) {
+    for (int i = 0, size = loop.size(); i < size - 1; ++i) {
+      const double dx = ToDouble(loop[i+1].x - loop[i].x);
+      const double dy = ToDouble(loop[i+1].y - loop[i].y);
+      boundary_pixels += std::round(std::sqrt(dx*dx + dy*dy));
+    }
+  }
+  CHECK_NE(boundary_pixels, 0);
 
-//   Rasterizer rasterizer;
-//   for (auto _ : state) {
-//     for (const std::vector<F2Point>& loop : loops) {
-//       rasterizer.Reset();
-//       for (int i = 0, size = loop.size(); i < size - 1; ++i) {
-//         rasterizer.AddEdge(loop[i].x, loop[i].y, loop[i+1].x, loop[i+1].y);
-//       }
-//     }
+  Rasterizer rasterizer;
+  for (auto _ : state) {
+    for (const std::vector<F2Point>& loop : loops) {
+      rasterizer.Reset();
+      for (int i = 0, size = loop.size(); i < size - 1; ++i) {
+        rasterizer.AddEdge(loop[i].x, loop[i].y, loop[i+1].x, loop[i+1].y);
+      }
+    }
 
-//     int count = 0;
-//     rasterizer.Sweep([&](auto) {
-//       ++count;
-//     });
+    int count = 0;
+    rasterizer.Sweep([&](auto) {
+      ++count;
+    });
 
-//     benchmark::DoNotOptimize(count);
-//   }
-//   state.SetItemsProcessed(state.iterations() * boundary_pixels);
-// }
-// BENCHMARK(BM_RasterizeLionFixed);
+    benchmark::DoNotOptimize(count);
+  }
+  state.SetItemsProcessed(state.iterations() * boundary_pixels);
+}
+BENCHMARK(BM_RasterizeLionFixed);
 
 
 }  // namespace w

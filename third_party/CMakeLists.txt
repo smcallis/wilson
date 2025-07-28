@@ -53,6 +53,14 @@ CPMAddPackage(
   OPTIONS "INSTALL_GTEST OFF"
 )
 
+CPMAddPackage(
+  NAME googlebenchmark
+  GITHUB_REPOSITORY google/benchmark
+  GIT_TAG v1.9.4
+  VERSION v1.9.4
+  OPTIONS "BENCHMARK_ENABLE_GTEST_TESTS OFF"
+)
+
 # Only compile SDL2 if we're not building for Emscripten.  If we are then we
 # should install its port with embuilder.
 if (EMSCRIPTEN)

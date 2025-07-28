@@ -17,6 +17,11 @@
 include(GoogleTest)
 include(doctest)
 
+# Compile main function that supports GTest, FuzzTest and Benchmark.
+add_library(test_main "test_main.cc")
+target_link_libraries(
+  test_main benchmark fuzztest::fuzztest fuzztest::init_fuzztest gmock gtest)
+
 # Add a doctest based test file and auto-discover its tests.
 function(add_doctest name source)
   add_executable(${name} ${source})
@@ -26,8 +31,7 @@ endfunction()
 # Add a gtest based test file and auto-discover its tests.
 function(add_gtest name source)
   add_executable(${name} ${source})
-  target_link_libraries(${name} PRIVATE gmock gtest s2)
-  link_fuzztest(${name})
+  target_link_libraries(${name} PRIVATE test_main s2)
   gtest_discover_tests(${name} ${name})
 endfunction()
 
