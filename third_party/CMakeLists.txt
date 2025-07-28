@@ -50,7 +50,7 @@ CPMAddPackage(
   GITHUB_REPOSITORY google/googletest
   GIT_TAG v1.14.0
   VERSION v1.14.0
-  OPTIONS "INSTALL_GTEST OFF" "gtest_force_shared_crt"
+  OPTIONS "INSTALL_GTEST OFF"
 )
 
 # Only compile SDL2 if we're not building for Emscripten.  If we are then we

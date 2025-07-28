@@ -12,21 +12,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Ensure GoogleTest test discovery macros are in scope.
+#   Workaround for https://gitlab.kitware.com/cmake/cmake/-/issues/25477
+include(GoogleTest)
+include(doctest)
+
+# Add a doctest based test file and auto-discover its tests.
+function(add_doctest name source)
+  add_executable(${name} ${source})
+  doctest_discover_tests(${name})
+endfunction()
+
+# Add a gtest based test file and auto-discover its tests.
+function(add_gtest name source)
+  add_executable(${name} ${source})
+  target_link_libraries(${name} PRIVATE gmock gtest s2)
+  link_fuzztest(${name})
+  gtest_discover_tests(${name} ${name})
+endfunction()
+
 # Enable test discovery.
 enable_testing()
 
-add_executable(wilson_test wilson_test.cc)
+add_doctest(wilson_test wilson_test.cc)
 target_link_libraries(wilson_test s2)
 
-add_executable(rasterize_test rasterize_test.cc)
-target_link_libraries(rasterize_test PRIVATE gmock gtest s2)
-link_fuzztest(rasterize_test)
-gtest_discover_tests(rasterize_test rasterize_test)
-
-add_executable(fixed_test fixed_test.cc)
-target_link_libraries(fixed_test PRIVATE gmock gtest s2)
-link_fuzztest(fixed_test)
-gtest_discover_tests(fixed_test fixed_test)
-
-include(doctest)
-doctest_discover_tests(wilson_test)
+add_gtest(rasterize_test rasterize_test.cc)
+add_gtest(fixed_test fixed_test.cc)
